@@ -1,0 +1,126 @@
+# Client boundary and access-control configuration for the Interbev/Arla RTD -> Vithit
+# transformation-learning and Golden Rules exercise. Interbev's boundary was discovered
+# empirically from live Snowflake grants on 2026-07-22 (see docs/SAFETY_CONTROLS.md for
+# the evidence). Arla RTD's boundary below is NOT yet confirmed the same way - every
+# UNCONFIRMED value must be replaced with real evidence (see docs/arla/ARLA_SAFETY_CONTROLS.md,
+# not yet written) before any Arla-specific mining runs. Do not guess these values.
+
+clients:
+  interbev:
+    access: read_only
+    database: INTERBEV
+    schemas: [LANDING, TRANSFORM, OUTPUT, sqlmesh, sqlmesh__OUTPUT, sqlmesh__TRANSFORM]
+    access_mechanism: >
+      Session role VITHIT_ANALYST_ROLE has Snowflake secondary role
+      INTERBEV_ANALYST_ROLE active (CURRENT_SECONDARY_ROLES = ALL). This grant
+      was made by OPTIA_PLATFORM_ADMIN_ROLE to user HELENACARRE on
+      2026-07-22 00:11:49, hours before this exercise began - evidence this
+      access was deliberately provisioned for this task, not incidental.
+    known_write_capability: >
+      INTERBEV_ANALYST_ROLE carries CREATE SCHEMA on the INTERBEV database
+      (a real write capability at the schema-container level). This must never
+      be exercised. Flagged for transparency, not because it will be used.
+    prohibited_operations:
+      - insert
+      - update
+      - delete
+      - merge
+      - truncate
+      - drop
+      - alter
+      - create_or_replace
+      - create_schema
+      - create_stage
+      - create_table
+      - create_view
+      - grant
+      - revoke
+    github_repository: https://github.com/optiadata/interbev/
+    github_access: read-only clone via authenticated gh CLI (private repo, account hkcarre)
+
+  arla_rtd:
+    access: read_only
+    database: UNCONFIRMED   # fill from live `SHOW DATABASES` - do not guess
+    schemas: UNCONFIRMED    # fill from live `SHOW SCHEMAS IN DATABASE <arla_db>`
+    access_mechanism: >
+      CONFIRMED 2026-07-27 via live SELECT CURRENT_SECONDARY_ROLES(): session role
+      VITHIT_ANALYST_ROLE has Snowflake secondary role ARLA_RTD_ANALYST_ROLE active
+      (CURRENT_SECONDARY_ROLES value = ALL, alongside HK_SANDBOX_ROLE and
+      INTERBEV_ANALYST_ROLE) - the identical mechanism to Interbev's own boundary.
+      Database/schema names still not yet confirmed - need SHOW DATABASES /
+      SHOW SCHEMAS IN DATABASE <db> before any Arla-specific mining runs.
+    known_write_capability: >
+      UNCONFIRMED - run SHOW GRANTS TO ROLE ARLA_RTD_ANALYST_ROLE to check for any
+      write-capable grant before relying on read_only being total. Interbev's own
+      analyst role unexpectedly carried CREATE SCHEMA on the whole database - do
+      not assume this one is clean just because Interbev's pattern matches.
+    prohibited_operations:
+      - insert
+      - update
+      - delete
+      - merge
+      - truncate
+      - drop
+      - alter
+      - create_or_replace
+      - create_schema
+      - create_stage
+      - create_table
+      - create_view
+      - grant
+      - revoke
+    github_repository: none
+    github_access: >
+      Not applicable - unlike Interbev, there is no source-controlled repo for
+      Arla RTD. All evidence comes from live Snowflake data via
+      scripts/profile_arla_rtd.py's read-only profiling battery, captured as a
+      timestamped artifact rather than re-queried live in every Discover/Verify
+      prompt (see scripts/workflows/domains/arla_rtd_domains.js).
+
+  vithit:
+    access: controlled_write
+    database: VITHIT
+    raw_schema: LANDING          # read-only, owned by VITHIT_ETL_ROLE
+    development_schema: TRANSFORM  # controlled write, VITHIT_ANALYST_ROLE has ownership on existing objects
+    note: >
+      Existing VITHIT.TRANSFORM objects (FLAVOURED_CARBONATES_*, MASTER_FLAV_CARB,
+      HC_* objects) are unrelated production work from an earlier session and
+      must not be touched by this exercise unless explicitly requested.
+
+  goldenacre:
+    access: controlled_write
+    database: GOLDENACRE
+    raw_schema: LANDING          # read-only, owned by GOLDENACRE_ETL_ROLE - tables
+      # ASDA, MORRISONS, SAINSBURY, TESCO, REFERENCE_DATABASE, _LOG
+    development_schema: TRANSFORM  # controlled write, GOLDENACRE_ANALYST_ROLE has
+      # CREATE TABLE/VIEW on this schema
+    access_mechanism: >
+      Session role VITHIT_ANALYST_ROLE has Snowflake secondary role
+      GOLDENACRE_ANALYST_ROLE active (CURRENT_SECONDARY_ROLES = ALL),
+      confirmed live 2026-07-29 alongside HK_SANDBOX_ROLE, INTERBEV_ANALYST_ROLE,
+      and ARLA_RTD_ANALYST_ROLE.
+    note: >
+      GOLDENACRE already runs a real, separate, sqlmesh-managed production
+      pipeline unrelated to this exercise: TRANSFORM views CLEANASDA,
+      CLEANMORRISON, CLEANSAINSBURY, CLEANTESCO, MASTER, REFERENCE (backed by
+      physical tables in the sqlmesh__TRANSFORM schema), and OUTPUT views
+      DASHBOARD, HALAL, POLISH, OTHER, EMPTY (live Power BI source). None of
+      these, nor the sqlmesh/sqlmesh__OUTPUT/sqlmesh__SQLMESH_EXAMPLE schemas,
+      may ever be touched by this exercise. New work here is scoped strictly
+      to creating new HC_-prefixed tables in TRANSFORM (see
+      write_allowed_objects.yaml) - confirmed via live INFORMATION_SCHEMA/
+      SHOW TABLES/SHOW VIEWS check on 2026-07-29 that no HC_-prefixed object
+      exists anywhere in GOLDENACRE today, so that prefix is collision-free.
+    known_write_capability: >
+      GOLDENACRE_ANALYST_ROLE carries CREATE SCHEMA on the GOLDENACRE database
+      (the same pattern as VITHIT_ANALYST_ROLE on VITHIT and
+      INTERBEV_ANALYST_ROLE on INTERBEV) - a real write capability at the
+      schema-container level. Must never be exercised as part of this work.
+
+  sandbox:
+    access: controlled_write
+    location: this repository's local filesystem (multi-agents/), plus
+      any new VITHIT.TRANSFORM objects explicitly created and named for
+      this exercise (not yet defined - see docs/OPEN_QUESTIONS.md), plus
+      new HC_-prefixed GOLDENACRE.TRANSFORM objects for the Golden Acre
+      harmonization build (see write_allowed_objects.yaml)

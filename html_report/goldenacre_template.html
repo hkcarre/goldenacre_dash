@@ -1,0 +1,973 @@
+<title>Golden Acre Foods — Retail Performance Analytics</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #faf9f6;
+    --surface: #ffffff;
+    --surface-2: #f2f0ea;
+    --border: rgba(20,20,26,0.10);
+    --border-strong: rgba(20,20,26,0.18);
+    --text-primary: #14141a;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --accent-navy: #2a4fa0;
+    --accent-navy-wash: #e8edf9;
+    --accent-gold: #d99a00;
+    --accent-gold-wash: #fbf0d9;
+    --accent-teal: #19aacc;
+    --accent-teal-wash: #e1f4f9;
+    --accent-magenta: #b23a56;
+    --accent-magenta-wash: #f8e6ea;
+    --unclassified: #898781;
+    --unclassified-wash: #eeece7;
+    --good: #1f7a45;
+    --bad: #b23a3a;
+    --chart-surface: #fcfcfb;
+    --grid: #e5e3db;
+    --swoosh-gold: #f2af00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #101119;
+      --surface: #191b26;
+      --surface-2: #20222f;
+      --border: rgba(255,255,255,0.10);
+      --border-strong: rgba(255,255,255,0.18);
+      --text-primary: #f5f4f1;
+      --text-secondary: #c7c6c0;
+      --text-muted: #8b8a85;
+      --accent-navy: #6e8fdb;
+      --accent-navy-wash: #1e2740;
+      --accent-gold: #c98500;
+      --accent-gold-wash: #332708;
+      --accent-teal: #1f8fad;
+      --accent-teal-wash: #0f2a31;
+      --accent-magenta: #c96580;
+      --accent-magenta-wash: #33202a;
+      --unclassified: #75746c;
+      --unclassified-wash: #24241f;
+      --good: #35b378;
+      --bad: #e0645f;
+      --chart-surface: #14141a;
+      --grid: #2b2b25;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #101119;
+    --surface: #191b26;
+    --surface-2: #20222f;
+    --border: rgba(255,255,255,0.10);
+    --border-strong: rgba(255,255,255,0.18);
+    --text-primary: #f5f4f1;
+    --text-secondary: #c7c6c0;
+    --text-muted: #8b8a85;
+    --accent-navy: #6e8fdb;
+    --accent-navy-wash: #1e2740;
+    --accent-gold: #c98500;
+    --accent-gold-wash: #332708;
+    --accent-teal: #1f8fad;
+    --accent-teal-wash: #0f2a31;
+    --accent-magenta: #c96580;
+    --accent-magenta-wash: #33202a;
+    --unclassified: #75746c;
+    --unclassified-wash: #24241f;
+    --good: #35b378;
+    --bad: #e0645f;
+    --chart-surface: #14141a;
+    --grid: #2b2b25;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #faf9f6; --surface: #ffffff; --surface-2: #f2f0ea;
+    --border: rgba(20,20,26,0.10); --border-strong: rgba(20,20,26,0.18);
+    --text-primary: #14141a; --text-secondary: #52514e; --text-muted: #898781;
+    --accent-navy: #2a4fa0; --accent-navy-wash: #e8edf9;
+    --accent-gold: #d99a00; --accent-gold-wash: #fbf0d9;
+    --accent-teal: #19aacc; --accent-teal-wash: #e1f4f9;
+    --accent-magenta: #b23a56; --accent-magenta-wash: #f8e6ea;
+    --unclassified: #898781; --unclassified-wash: #eeece7;
+    --good: #1f7a45; --bad: #b23a3a;
+    --chart-surface: #fcfcfb; --grid: #e5e3db;
+  }
+
+  @font-face {
+    font-family: 'Libre Franklin';
+    src: url(data:font/woff2;base64,__FONT_LIBRE_B64__) format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'Open Sans';
+    src: url(data:font/woff2;base64,__FONT_OPENSANS_B64__) format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: 'Open Sans', ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  h1, h2, h3, .num-hero, .num-large {
+    font-family: 'Libre Franklin', ui-sans-serif, system-ui, sans-serif;
+    text-wrap: balance;
+    margin: 0;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+  a { color: var(--accent-navy); }
+
+  /* ---------- app shell: left nav + main panel ---------- */
+  .app-shell { display: flex; min-height: 100vh; align-items: flex-start; }
+  .sidebar {
+    flex: none; width: 240px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    background: var(--accent-navy); color: #fff; padding: 22px 14px 20px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 22px; }
+  .sidebar-brand svg { height: 28px; width: auto; display: block; filter: brightness(0) invert(1); }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px;
+    color: rgba(255,255,255,0.75); font-size: 13.5px; font-weight: 600; cursor: pointer;
+    border: none; background: transparent; text-align: left; width: 100%;
+    font-family: 'Open Sans', sans-serif;
+  }
+  .nav-item .ic { width: 16px; text-align: center; flex: none; opacity: 0.9; }
+  .nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .nav-item.active { background: var(--accent-gold); color: #1a1400; }
+  .nav-item.active .ic { opacity: 1; }
+  .sidebar-foot { margin-top: auto; padding: 14px 12px 4px; border-top: 1px solid rgba(255,255,255,0.14); font-size: 11px; color: rgba(255,255,255,0.55); }
+  .main-panel { flex: 1; min-width: 0; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-top { padding: 32px 32px 4px; }
+  .page-top .eyebrow { margin-bottom: 2px; }
+  .page-top h1 { font-size: clamp(24px, 3vw, 32px); font-weight: 800; letter-spacing: -0.01em; }
+
+  @media (max-width: 860px) {
+    .app-shell { flex-direction: column; }
+    .sidebar {
+      width: 100%; height: auto; position: relative; flex-direction: row; align-items: center;
+      overflow-x: auto; overflow-y: visible; padding: 12px; gap: 6px;
+    }
+    .sidebar-brand { padding: 4px 10px; flex: none; }
+    .sidebar-foot { display: none; }
+    .nav-item { white-space: nowrap; flex: none; }
+  }
+
+  /* ---------- hero ---------- */
+  .hero {
+    background: linear-gradient(180deg, var(--accent-navy-wash), var(--bg) 70%);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 0 32px;
+    margin-bottom: 40px;
+  }
+  .hero-inner { display: flex; align-items: center; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
+  .hero-logo svg { height: 46px; width: auto; display: block; }
+  .hero-meta { text-align: right; }
+  .hero-meta .asof { font-weight: 600; color: var(--text-primary); }
+  .hero-meta .scope { color: var(--text-secondary); font-size: 13.5px; max-width: 420px; }
+  .hero-title {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin-top: 20px;
+  }
+  .hero-sub { color: var(--text-secondary); font-size: 16px; margin-top: 8px; max-width: 640px; }
+
+  /* ---------- Ask Sprout page ---------- */
+  .sprout-banner {
+    display: flex; gap: 14px; align-items: flex-start; background: var(--accent-gold-wash);
+    border: 1px solid var(--accent-gold); border-radius: 14px; padding: 18px 20px; margin-bottom: 24px;
+  }
+  .sprout-banner .ic { font-size: 22px; flex: none; }
+  .sprout-banner code { background: rgba(0,0,0,0.08); padding: 2px 7px; border-radius: 5px; font-size: 12.5px; }
+  .chat-mock { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 18px; }
+  .chat-mock .chat-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 14px; }
+  .chat-bubble { display: flex; gap: 10px; margin-bottom: 16px; align-items: flex-start; }
+  .chat-bubble.user { flex-direction: row-reverse; }
+  .chat-avatar { width: 30px; height: 30px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .chat-avatar.sprout { background: var(--accent-navy); color: #fff; }
+  .chat-avatar.user { background: var(--surface-2); color: var(--text-secondary); }
+  .chat-text { background: var(--surface-2); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; color: var(--text-secondary); max-width: 82%; }
+  .chat-bubble.user .chat-text { background: var(--accent-navy-wash); color: var(--text-primary); }
+
+  section { margin-bottom: 56px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  .section-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.005em; }
+  .section-note { color: var(--text-muted); font-size: 13px; max-width: 480px; }
+  .eyebrow {
+    font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent-navy); margin-bottom: 6px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+  }
+
+  /* ---------- KPI tiles ---------- */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+  .kpi-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px 16px; }
+  .kpi-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .kpi-value { font-family: 'Libre Franklin', sans-serif; font-weight: 800; font-size: 27px; letter-spacing: -0.01em; margin-top: 6px; }
+  .kpi-delta { font-size: 12.5px; font-weight: 600; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+  .kpi-delta.up { color: var(--good); }
+  .kpi-delta.down { color: var(--bad); }
+  .kpi-delta.flat { color: var(--text-muted); }
+  .kpi-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+
+  /* ---------- legend ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--text-secondary); margin-top: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  .legend-swatch.line { width: 16px; height: 3px; border-radius: 2px; }
+  .legend-swatch.hatched { background-image: repeating-linear-gradient(45deg, currentColor 0 2px, transparent 2px 6px); color: var(--unclassified); background-color: var(--unclassified-wash); }
+
+  /* ---------- bar chart (retailer share) ---------- */
+  .barchart-row { display: grid; grid-template-columns: 108px 1fr 84px; align-items: center; gap: 12px; padding: 7px 0; }
+  .barchart-row .name { font-size: 13px; font-weight: 600; }
+  .barchart-track { position: relative; height: 22px; background: var(--surface-2); border-radius: 5px; overflow: visible; }
+  .barchart-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 5px 4px 4px 5px; }
+  .barchart-val { font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .barchart-val .delta { display: block; font-size: 11px; font-weight: 700; }
+
+  /* ---------- stacked share bar ---------- */
+  .stackbar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; }
+  .stackbar > div { position: relative; }
+  .stack-legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr)); gap: 10px; margin-top: 16px; }
+  .stack-legend-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+  .stack-legend-item .sw { width: 13px; height: 13px; border-radius: 4px; flex: none; }
+  .stack-legend-item .lbl { font-size: 13px; font-weight: 700; }
+  .stack-legend-item .pct { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stack-legend-item .chg { font-size: 11.5px; font-weight: 600; }
+
+  /* ---------- treemap ---------- */
+  .treemap-controls { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .pill-btn {
+    font-family: 'Open Sans', sans-serif; font-size: 12.5px; font-weight: 600;
+    padding: 6px 13px; border-radius: 999px; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text-secondary); cursor: pointer;
+  }
+  .pill-btn[aria-pressed="true"] { background: var(--accent-navy); border-color: var(--accent-navy); color: #fff; }
+  #treemap-root { position: relative; width: 100%; height: 420px; }
+  .tm-tile {
+    position: absolute; border-radius: 4px; overflow: hidden;
+    outline: 2px solid var(--chart-surface); outline-offset: -1px;
+    cursor: pointer; transition: filter 0.12s ease;
+  }
+  .tm-tile:hover, .tm-tile:focus-visible { filter: brightness(1.08); }
+  .tm-tile .tm-label { position: absolute; inset: 0; padding: 5px 7px; font-size: 11px; font-weight: 700; line-height: 1.25; pointer-events: none; overflow: hidden; }
+  .tm-tile .tm-label .b { display: block; font-size: 10.5px; font-weight: 400; opacity: 0.85; }
+  .diverging-key { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 11.5px; color: var(--text-muted); }
+  .diverging-key .bar { height: 8px; width: 180px; border-radius: 4px; background: linear-gradient(90deg, var(--bad), #d8d5cb 50%, var(--good)); }
+
+  /* ---------- trend chart ---------- */
+  #trend-root { position: relative; }
+  .trend-tooltip {
+    position: absolute; pointer-events: none; background: var(--text-primary); color: var(--bg);
+    font-size: 11.5px; padding: 8px 10px; border-radius: 8px; opacity: 0; transform: translate(-50%, -100%);
+    white-space: nowrap; z-index: 5; transition: opacity 0.08s ease;
+  }
+  .trend-tooltip .tt-val { font-weight: 700; font-size: 13px; }
+  .trend-tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
+  .trend-tooltip .tt-row + .tt-row { margin-top: 2px; }
+  .trend-tooltip .tt-key { width: 9px; height: 3px; border-radius: 2px; flex: none; }
+
+  /* ---------- predictions ---------- */
+  .pred-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 12px; }
+  .pred-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .pred-name { font-size: 12.5px; font-weight: 700; color: var(--text-secondary); }
+  .pred-value { display: flex; align-items: baseline; gap: 6px; margin-top: 8px; }
+  .pred-value .arrow { font-size: 18px; line-height: 1; }
+  .pred-value .n { font-family: 'Libre Franklin', sans-serif; font-weight: 800; font-size: 21px; }
+  .pred-fit { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+  .fit-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  /* ---------- insights ---------- */
+  .insight-list { display: flex; flex-direction: column; gap: 12px; }
+  .insight { display: flex; gap: 14px; border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; background: var(--surface); }
+  .insight .n { font-family: 'Libre Franklin', sans-serif; font-weight: 800; font-size: 20px; color: var(--accent-navy); flex: none; width: 28px; }
+  .insight p { margin: 0; font-size: 14px; color: var(--text-secondary); }
+  .insight strong { color: var(--text-primary); }
+
+  /* ---------- table view (accessibility) ---------- */
+  details.table-view { margin-top: 14px; }
+  details.table-view summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--accent-navy); }
+  table.data-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+  table.data-table th, table.data-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  table.data-table th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; }
+  .table-scroll { overflow-x: auto; }
+
+  footer { border-top: 1px solid var(--border); padding-top: 28px; color: var(--text-muted); font-size: 12px; }
+  footer h3 { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+  footer ul { padding-left: 18px; margin: 8px 0; }
+  footer li { margin-bottom: 6px; }
+  .qa-badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--good); font-size: 12.5px; margin-bottom: 14px; }
+  .qa-badge svg { width: 14px; height: 14px; }
+
+  @media (max-width: 640px) {
+    .hero-inner { flex-direction: column; align-items: flex-start; }
+    .hero-meta { text-align: left; }
+    .barchart-row { grid-template-columns: 88px 1fr 70px; }
+  }
+</style>
+
+<div class="app-shell">
+  <nav class="sidebar">
+    <div class="sidebar-brand">__GA_LOGO_SVG__</div>
+    <button class="nav-item active" data-page="overview" type="button"><span class="ic">&#9673;</span>Overview</button>
+    <button class="nav-item" data-page="market-share" type="button"><span class="ic">&#9636;</span>Market Share</button>
+    <button class="nav-item" data-page="top-brands" type="button"><span class="ic">&#9733;</span>Top Brands</button>
+    <button class="nav-item" data-page="brand-map" type="button"><span class="ic">&#9635;</span>Brand Map</button>
+    <button class="nav-item" data-page="trend" type="button"><span class="ic">&#8599;</span>Trend</button>
+    <button class="nav-item" data-page="predictions" type="button"><span class="ic">&#8250;</span>Predictions</button>
+    <button class="nav-item" data-page="insights" type="button"><span class="ic">&#9673;</span>Insights</button>
+    <button class="nav-item" data-page="sprout" type="button"><span class="ic">&#127793;</span>Ask Sprout</button>
+    <div class="sidebar-foot">As of __AS_OF_DATE__<br>ASDA · Morrisons · Sainsbury's · Tesco</div>
+  </nav>
+
+  <main class="main-panel">
+
+    <div class="page active" data-page="overview">
+      <div class="hero">
+        <div class="wrap hero-inner" style="padding:0 32px;max-width:none;">
+          <h1 class="hero-title" style="margin:0;">Retail Performance Analytics</h1>
+          <div class="hero-meta">
+            <div class="asof">As of __AS_OF_DATE__</div>
+            <div class="scope">Halal, Polish &amp; World Foods categories · MAT = latest 52 weeks per retailer</div>
+          </div>
+        </div>
+        <div class="wrap" style="padding:0 32px;max-width:none;">
+          <p class="hero-sub">Built on Optia's harmonised <code>HC_MASTER</code> data layer — every figure below is computed directly from Snowflake, independently re-verified before delivery (see methodology in the footer).</p>
+        </div>
+      </div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="kpis">
+          <div class="section-head">
+            <h2>Headline performance — latest MAT vs. prior year</h2>
+          </div>
+          <div class="kpi-grid" id="kpi-grid"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="market-share">
+      <div class="page-top"><div class="eyebrow">Market share</div><h1>Retailer &amp; category share</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="retailer-share">
+          <div class="section-head">
+            <h2>Value sales by retailer</h2>
+            <div class="section-note">MAT value sales and share of the four-retailer total, with change vs. the prior MAT.</div>
+          </div>
+          <div class="card" id="retailer-bar-card"></div>
+        </section>
+        <section id="category-share">
+          <div class="section-head">
+            <h2>Value sales by category</h2>
+            <div class="section-note">Categories come from Golden Acre's product reference data (Halal / Polish / Other). "Unclassified" is not a business category — it's the share of value sales with no reference-data match at all.</div>
+          </div>
+          <div class="card">
+            <div class="stackbar" id="stack-bar"></div>
+            <div class="stack-legend-grid" id="stack-legend"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="top-brands">
+      <div class="page-top"><div class="eyebrow">Market share</div><h1>Top 10 brands</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="top-brands-section">
+          <div class="section-head">
+            <div class="section-note">Brand identity is the reference-matched brand where one exists, otherwise the retailer's own product labelling — so retailer-name entries here are largely private label, not a single manufacturer.</div>
+          </div>
+          <div class="card" id="brand-bar-card"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="brand-map">
+      <div class="page-top"><div class="eyebrow">Category &amp; brand map</div><h1>Where the value sits, and who's winning it</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="treemap">
+          <div class="section-head">
+            <div class="section-note">Tile size = MAT value sales. Tile colour = change vs. prior MAT (green = growing, red = declining). No geographic dimension exists in the source data, so this treemap is Golden Acre's "map" — a real, data-driven view of category/brand concentration.</div>
+          </div>
+          <div class="card">
+            <div class="treemap-controls" id="treemap-filters"></div>
+            <div id="treemap-root"></div>
+            <div class="diverging-key">
+              <span>Declining</span><span class="bar"></span><span>Growing</span>
+            </div>
+            <details class="table-view">
+              <summary>View as table</summary>
+              <div class="table-scroll"><table class="data-table" id="treemap-table"></table></div>
+            </details>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="trend">
+      <div class="page-top"><div class="eyebrow">Trend</div><h1>Monthly value sales</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="trend-section">
+          <div class="section-head">
+            <div class="section-note">Full available history. The final month is a partial period (data cuts off mid-month) and is shown dashed, not as a real month-on-month drop.</div>
+          </div>
+          <div class="card">
+            <div class="treemap-controls" id="trend-filters"></div>
+            <div id="trend-root"></div>
+            <div class="legend" id="trend-legend"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="predictions">
+      <div class="page-top"><div class="eyebrow">Directional trend, not a forecast</div><h1>Trailing 12-week momentum</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="predictions-section">
+          <div class="section-head">
+            <div class="section-note">A naive straight-line fit over the last 12 weeks, expressed as %/week. This is a directional read, not a statistical forecast — the fit-quality badge (R²) tells you how much to trust the direction.</div>
+          </div>
+          <div class="pred-grid" id="pred-grid"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="insights">
+      <div class="page-top"><div class="eyebrow">Actionable insights</div><h1>What the data says to do next</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+        <section id="insights-section">
+          <div class="insight-list">
+            <div class="insight"><div class="n">1</div><p><strong>Overall value sales are down 3.4% MAT vs. MAT YA</strong> (£2.52bn vs. £2.61bn) — but that understates the volume story. Unit sales fell 6.4%, while the average price per unit actually <strong>rose 3.2%</strong> (£2.00 → £2.07 MAT YA vs. MAT), which cushioned roughly half of the volume decline's impact on revenue. This is a genuine demand softening partly offset by price/mix, not a flat-price volume story.</p></div>
+            <div class="insight"><div class="n">2</div><p><strong>Retailer performance is diverging.</strong> ASDA, the largest retailer at 47.5% share, saw the sharpest MAT decline (‑7.9%), while Morrisons (15.4% share) grew +7.7% — a share shift toward Morrisons worth investigating for distribution or space gains.</p></div>
+            <div class="insight"><div class="n">3</div><p><strong>The single biggest lever available is data, not merchandising:</strong> 45.2% of MAT value sales (£1.14bn) sits in products with no product-reference match at all — larger than Halal and Polish combined (15.9%). This "Unclassified" bucket is also the <em>only</em> segment growing (+7.8%), while the reference-matched "Other" category shrank 14.0% — new SKUs appear to be entering faster than the reference master data is updated. Expanding reference-database coverage would sharpen every chart in this report, not just this one.</p></div>
+            <div class="insight"><div class="n">4</div><p><strong>No single Halal brand has full 4-retailer strength.</strong> Haji Baba leads at ASDA (£28.8m), Tariq Halal at Sainsbury's (£21.9m), and Shazans leads at both Morrisons (£6.8m) and Tesco (£24.7m) — each retailer's shelf is led by a different brand, a plausible listing-expansion opportunity for whichever brand is currently under-distributed.</p></div>
+            <div class="insight"><div class="n">5</div><p><strong>Short-term momentum (trailing 12 weeks) is broadly negative</strong> across almost every retailer and category — but fit quality is weak-to-moderate for most of them (e.g. the total trend's R² is just 0.10). Treat this as a real recent wobble worth watching, not a confident multi-month forecast; see the methodology note below.</p></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="page" data-page="sprout">
+      <div class="page-top"><div class="eyebrow">Live data assistant</div><h1>Ask Sprout</h1></div>
+      <div class="wrap" style="padding:0 32px 40px;max-width:640px;">
+        <div class="sprout-banner">
+          <div class="ic">&#127793;</div>
+          <div>
+            <strong>Sprout runs live in the companion Golden Acre Analytics app, not in this static report.</strong>
+            <p style="margin:6px 0 0;font-size:13px;">A published HTML report can't call a live language model — only the running app can. Launch it locally with <code>.\run_goldenacre_app.ps1</code> (password in <code>.env</code>) to ask Sprout questions about this exact data. The example below is a real, tested exchange, not a live conversation.</p>
+          </div>
+        </div>
+        <div class="chat-mock">
+          <div class="chat-label">Example exchange (captured while testing Sprout)</div>
+          <div class="chat-bubble user">
+            <div class="chat-avatar user">&#128100;</div>
+            <div class="chat-text">Which retailer has the largest share, and how is it trending?</div>
+          </div>
+          <div class="chat-bubble">
+            <div class="chat-avatar sprout">&#127793;</div>
+            <div class="chat-text">ASDA holds the largest share at 47.52% of MAT value sales (£1.198bn), but it's also declining fastest year-on-year, down 7.89% vs MAT YA.<br><br>On the trailing 12-week trend, ASDA's slope is &minus;6.525%/week with a reasonably good fit (R²=0.702), so the directional read is a continued fall rather than a bottoming-out — though this is a trend line, not a firm forecast. Worth flagging: this MAT comparison is calculated on ASDA's own retailer calendar, which won't line up week-for-week with Tesco's (offset by a day).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap" style="padding:0 32px 40px;max-width:none;">
+      <footer>
+        <div class="qa-badge">
+          __QA_BADGE_ICON__
+          __QA_STATUS_LINE__
+        </div>
+        <h3>Methodology</h3>
+        <ul>
+          <li>Source: <code>GOLDENACRE.TRANSFORM.HC_MASTER</code> joined to <code>HC_PERIOD_DIM_CLEAN</code> — Optia's harmonised layer, additive to and independent of Golden Acre's existing production pipeline (see <code>multi-agents/docs/goldenacre/</code>).</li>
+          <li>MAT (moving annual total) and its year-ago comparison (MAT YA) are ranked <strong>per retailer</strong>, not on a shared calendar — Tesco's week-ending date is offset by one day from the other three retailers every week, so a shared rank would misclassify everyone's current year.</li>
+          <li>"Predictions" are a linear trend slope over the trailing 12 weeks, normalised to %/week of that window's own mean — a directional signal, not a confidence-scored forecast. Fit quality (R²) is shown alongside every value so a noisy trend isn't read as a firm one.</li>
+          <li>"Unclassified" reflects products with no match in Golden Acre's product reference table as of its most recent snapshot — a data-coverage gap, not a business category. See the reference-match KPI above.</li>
+          <li>All figures were independently re-derived directly from Snowflake as a QA pass before delivery — see the note above.</li>
+        </ul>
+      </footer>
+    </div>
+
+  </main>
+</div>
+
+<div class="trend-tooltip" id="trend-tooltip"></div>
+
+<script>
+const DATA = __DATA_JSON__;
+
+function fmtGBPCompact(n) {
+  if (n === null || n === undefined) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return '£' + (n/1e9).toFixed(2) + 'bn';
+  if (abs >= 1e6) return '£' + (n/1e6).toFixed(1) + 'm';
+  if (abs >= 1e3) return '£' + (n/1e3).toFixed(0) + 'k';
+  return '£' + n.toFixed(0);
+}
+function fmtNumCompact(n) {
+  if (n === null || n === undefined) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return (n/1e9).toFixed(2) + 'bn';
+  if (abs >= 1e6) return (n/1e6).toFixed(1) + 'm';
+  if (abs >= 1e3) return (n/1e3).toFixed(0) + 'k';
+  return n.toFixed(0);
+}
+function fmtPct(n, withSign) {
+  if (n === null || n === undefined) return '—';
+  const s = (withSign && n > 0 ? '+' : '') + n.toFixed(1) + '%';
+  return s;
+}
+function deltaClass(n, upIsGood) {
+  if (n === null || n === undefined) return 'flat';
+  if (Math.abs(n) < 0.05) return 'flat';
+  const positive = n > 0;
+  return (positive === (upIsGood !== false)) ? 'up' : 'down';
+}
+function deltaArrow(n) {
+  if (n === null || n === undefined || Math.abs(n) < 0.05) return '→';
+  return n > 0 ? '↑' : '↓';
+}
+const CAT_COLOR = {
+  HALAL: 'var(--accent-navy)',
+  POLISH: 'var(--accent-gold)',
+  OTHER: 'var(--accent-teal)',
+  UNCLASSIFIED: 'var(--unclassified)',
+};
+const CAT_WASH = {
+  HALAL: 'var(--accent-navy-wash)',
+  POLISH: 'var(--accent-gold-wash)',
+  OTHER: 'var(--accent-teal-wash)',
+  UNCLASSIFIED: 'var(--unclassified-wash)',
+};
+const RETAILER_COLOR = {
+  ASDA: 'var(--accent-navy)',
+  MORRISONS: 'var(--accent-gold)',
+  SAINSBURY: 'var(--accent-teal)',
+  TESCO: 'var(--accent-magenta)',
+};
+const RETAILER_LABEL = {ASDA:'ASDA', MORRISONS:'Morrisons', SAINSBURY:"Sainsbury's", TESCO:'Tesco'};
+const CAT_LABEL = {HALAL:'Halal', POLISH:'Polish', OTHER:'Other', UNCLASSIFIED:'Unclassified'};
+
+/* ---------------- KPI tiles ---------------- */
+(function renderKPIs(){
+  const k = DATA.kpis;
+  const tiles = [
+    {label: 'Value sales (MAT)', value: fmtGBPCompact(k.value_sales_mat), delta: k.value_sales_change_pct, sub: 'vs ' + fmtGBPCompact(k.value_sales_mat_ya) + ' MAT YA'},
+    {label: 'Unit sales (MAT)', value: fmtNumCompact(k.unit_sales_mat), delta: k.unit_sales_change_pct, sub: 'vs ' + fmtNumCompact(k.unit_sales_mat_ya) + ' MAT YA'},
+    {label: 'Avg price per unit', value: '£' + k.avg_price_per_unit_mat.toFixed(2), delta: null, sub: 'value ÷ unit sales, MAT'},
+    {label: 'Distinct products', value: k.distinct_products_mat.toLocaleString(), delta: null, sub: 'by barcode, MAT'},
+    {label: 'Distinct brands', value: k.distinct_brands_mat.toLocaleString(), delta: null, sub: 'reference-matched + retailer-labelled'},
+    {label: 'Reference match rate (rows)', value: k.reference_match_pct_mat_rows.toFixed(1) + '%', delta: null, sub: fmtPct(k.unmatched_value_sales_mat_pct) + ' of MAT value unmatched', warn: true},
+  ];
+  const grid = document.getElementById('kpi-grid');
+  tiles.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'kpi-tile';
+    const dcls = t.delta === null ? '' : deltaClass(t.delta);
+    el.innerHTML = `
+      <div class="kpi-label">${t.label}</div>
+      <div class="kpi-value">${t.value}</div>
+      ${t.delta !== null ? `<div class="kpi-delta ${dcls}">${deltaArrow(t.delta)} ${fmtPct(t.delta, true)}</div>` : ''}
+      <div class="kpi-sub" style="${t.warn ? 'color:var(--bad);font-weight:600;' : ''}">${t.sub}</div>
+    `;
+    grid.appendChild(el);
+  });
+})();
+
+/* ---------------- retailer share bar chart ---------------- */
+(function renderRetailerBars(){
+  const rows = DATA.retailer_share;
+  const max = Math.max(...rows.map(r => r.value_sales_mat));
+  const card = document.getElementById('retailer-bar-card');
+  rows.forEach(r => {
+    const pct = (r.value_sales_mat / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'barchart-row';
+    row.setAttribute('tabindex', '0');
+    row.title = `${RETAILER_LABEL[r.retailer]}: ${fmtGBPCompact(r.value_sales_mat)} (${r.share_pct.toFixed(1)}% share), ${fmtPct(r.change_pct, true)} vs MAT YA`;
+    row.innerHTML = `
+      <div class="name">${RETAILER_LABEL[r.retailer]}</div>
+      <div class="barchart-track"><div class="barchart-fill" style="width:${pct}%;background:${RETAILER_COLOR[r.retailer]}"></div></div>
+      <div class="barchart-val">${fmtGBPCompact(r.value_sales_mat)}<span class="delta" style="color:var(--${deltaClass(r.change_pct)==='up'?'good':deltaClass(r.change_pct)==='down'?'bad':'text-muted'})">${deltaArrow(r.change_pct)} ${fmtPct(r.change_pct,true)}</span></div>
+    `;
+    card.appendChild(row);
+  });
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  rows.forEach(r => {
+    legend.innerHTML += `<span class="legend-item"><span class="legend-swatch" style="background:${RETAILER_COLOR[r.retailer]}"></span>${RETAILER_LABEL[r.retailer]} · ${r.share_pct.toFixed(1)}% share</span>`;
+  });
+  card.appendChild(legend);
+})();
+
+/* ---------------- top brands bar chart ---------------- */
+(function renderTopBrands(){
+  // Nominal categorical, single series (ranking one measure, not comparing named
+  // series) - one hue throughout per the dataviz skill's rule, no legend needed.
+  const rows = DATA.top_brands;
+  const max = Math.max(...rows.map(r => r.value_sales_mat));
+  const card = document.getElementById('brand-bar-card');
+  rows.forEach(r => {
+    const pct = (r.value_sales_mat / max) * 100;
+    const dcls = deltaClass(r.change_pct);
+    const row = document.createElement('div');
+    row.className = 'barchart-row';
+    row.style.gridTemplateColumns = '150px 1fr 84px';
+    row.setAttribute('tabindex', '0');
+    row.title = `${r.brand}: ${fmtGBPCompact(r.value_sales_mat)} (${r.share_pct.toFixed(1)}% of total), ${fmtPct(r.change_pct, true)} vs MAT YA`;
+    row.innerHTML = `
+      <div class="name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.brand}</div>
+      <div class="barchart-track"><div class="barchart-fill" style="width:${pct}%;background:var(--accent-navy)"></div></div>
+      <div class="barchart-val">${fmtGBPCompact(r.value_sales_mat)}<span class="delta" style="color:${dcls==='up'?'var(--good)':dcls==='down'?'var(--bad)':'var(--text-muted)'}">${deltaArrow(r.change_pct)} ${fmtPct(r.change_pct,true)}</span></div>
+    `;
+    card.appendChild(row);
+  });
+  const note = document.createElement('div');
+  note.className = 'section-note';
+  note.style.marginTop = '12px';
+  note.textContent = `Share is of total MAT value sales across all four retailers (£${(DATA.retailer_share.reduce((s,r)=>s+r.value_sales_mat,0)/1e9).toFixed(2)}bn).`;
+  card.appendChild(note);
+})();
+
+/* ---------------- category stacked bar ---------------- */
+(function renderCategoryStack(){
+  const rows = DATA.category_share.slice().sort((a,b) => {
+    const order = ['OTHER','HALAL','POLISH','UNCLASSIFIED'];
+    return order.indexOf(a.category) - order.indexOf(b.category);
+  });
+  const stack = document.getElementById('stack-bar');
+  rows.forEach(r => {
+    const seg = document.createElement('div');
+    seg.style.width = r.share_pct + '%';
+    seg.style.background = CAT_COLOR[r.category];
+    seg.style.borderRight = '2px solid var(--chart-surface)';
+    seg.title = `${CAT_LABEL[r.category]}: ${fmtGBPCompact(r.value_sales_mat)} (${r.share_pct.toFixed(1)}%)`;
+    seg.tabIndex = 0;
+    stack.appendChild(seg);
+  });
+  const legend = document.getElementById('stack-legend');
+  rows.forEach(r => {
+    const item = document.createElement('div');
+    item.className = 'stack-legend-item';
+    const dcls = deltaClass(r.change_pct);
+    item.innerHTML = `
+      <span class="sw" style="background:${CAT_COLOR[r.category]}"></span>
+      <span class="lbl">${CAT_LABEL[r.category]}</span>
+      <span class="pct">${r.share_pct.toFixed(1)}%</span>
+    `;
+    const chg = document.createElement('span');
+    chg.className = 'chg';
+    chg.style.color = dcls==='up' ? 'var(--good)' : dcls==='down' ? 'var(--bad)' : 'var(--text-muted)';
+    chg.style.marginLeft = '8px';
+    chg.textContent = `${deltaArrow(r.change_pct)} ${fmtPct(r.change_pct, true)}`;
+    item.appendChild(chg);
+    legend.appendChild(item);
+  });
+})();
+
+/* ---------------- treemap ---------------- */
+function squarify(items, x, y, w, h) {
+  // simple slice-and-dice treemap (alternating orientation), sufficient for
+  // ~5-8 leaves per view; not a full squarified algorithm but keeps aspect
+  // ratios reasonable at this item count.
+  items = items.slice().sort((a,b) => b.value - a.value);
+  const total = items.reduce((s,i) => s + i.value, 0) || 1;
+  const rects = [];
+  let horizontal = w >= h;
+  let offset = 0;
+  items.forEach(it => {
+    const frac = it.value / total;
+    if (horizontal) {
+      const iw = w * frac;
+      rects.push({item: it, x: x + offset, y: y, w: iw, h: h});
+      offset += iw;
+    } else {
+      const ih = h * frac;
+      rects.push({item: it, x: x, y: y + offset, w: w, h: ih});
+      offset += ih;
+    }
+  });
+  return rects;
+}
+function divergingColor(pct) {
+  // pct: signed % change. Clamp to [-30, 30] for color intensity, gray at 0.
+  if (pct === null || pct === undefined) return '#9a988f';
+  const t = Math.max(-30, Math.min(30, pct)) / 30; // -1..1
+  const goodRGB = [31,122,69], badRGB = [178,58,58], neutRGB = [200,197,187];
+  const mix = (a,b,f) => Math.round(a + (b-a)*f);
+  let rgb;
+  if (t >= 0) rgb = [0,1,2].map(i => mix(neutRGB[i], goodRGB[i], t));
+  else rgb = [0,1,2].map(i => mix(neutRGB[i], badRGB[i], -t));
+  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+}
+function renderTreemap(retailerKey) {
+  const root = document.getElementById('treemap-root');
+  root.innerHTML = '';
+  const leaves = DATA.treemap_by_retailer[retailerKey];
+  const w = root.clientWidth, h = 420;
+  // group by category into columns sized by category total, then treemap brands within
+  const byCat = {};
+  leaves.forEach(l => { (byCat[l.category] = byCat[l.category] || []).push(l); });
+  const catTotals = Object.entries(byCat).map(([cat, ls]) => ({cat, value: ls.reduce((s,l)=>s+l.value_sales_mat,0), leaves: ls}));
+  catTotals.sort((a,b) => b.value - a.value);
+  const totalAll = catTotals.reduce((s,c)=>s+c.value, 0) || 1;
+  let xOff = 0;
+  const tableRows = [];
+  catTotals.forEach(colDef => {
+    const colW = w * (colDef.value / totalAll);
+    const brandRects = squarify(colDef.leaves.map(l => ({value: l.value_sales_mat, data: l})), xOff, 0, colW, h);
+    brandRects.forEach(r => {
+      const l = r.item.data;
+      const el = document.createElement('div');
+      el.className = 'tm-tile';
+      el.style.left = r.x + 'px'; el.style.top = r.y + 'px';
+      el.style.width = Math.max(r.w - 2, 0) + 'px'; el.style.height = Math.max(r.h - 2, 0) + 'px';
+      el.style.background = divergingColor(l.change_pct);
+      el.tabIndex = 0;
+      const textColor = '#fff';
+      const showLabel = r.w > 54 && r.h > 26;
+      el.innerHTML = showLabel ? `<div class="tm-label" style="color:${textColor}">${l.brand}<span class="b">${fmtGBPCompact(l.value_sales_mat)} · ${fmtPct(l.change_pct, true)}</span></div>` : '';
+      el.title = `${CAT_LABEL[l.category]} · ${l.brand}: ${fmtGBPCompact(l.value_sales_mat)} MAT, ${fmtPct(l.change_pct, true)} vs MAT YA`;
+      root.appendChild(el);
+      tableRows.push(l);
+    });
+    xOff += colW;
+  });
+  // table view
+  const table = document.getElementById('treemap-table');
+  table.innerHTML = `<thead><tr><th>Category</th><th>Brand</th><th>Value sales (MAT)</th><th>Change vs MAT YA</th></tr></thead>` +
+    '<tbody>' + tableRows.sort((a,b)=>b.value_sales_mat-a.value_sales_mat).map(l =>
+      `<tr><td>${CAT_LABEL[l.category]}</td><td>${l.brand}</td><td>${fmtGBPCompact(l.value_sales_mat)}</td><td>${fmtPct(l.change_pct, true)}</td></tr>`
+    ).join('') + '</tbody>';
+}
+// Deferred, not an IIFE: the treemap needs the "Brand Map" page's real
+// clientWidth, which is 0 while its page is display:none - the nav
+// controller calls this once, the first time that page is activated,
+// after the page is already visible.
+function initTreemap(){
+  const filters = document.getElementById('treemap-filters');
+  const keys = Object.keys(DATA.treemap_by_retailer);
+  keys.forEach((key, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'pill-btn';
+    btn.type = 'button';
+    btn.textContent = key === 'ALL' ? 'All retailers' : RETAILER_LABEL[key];
+    btn.setAttribute('aria-pressed', i === 0 ? 'true' : 'false');
+    btn.addEventListener('click', () => {
+      filters.querySelectorAll('.pill-btn').forEach(b => b.setAttribute('aria-pressed','false'));
+      btn.setAttribute('aria-pressed','true');
+      renderTreemap(key);
+    });
+    filters.appendChild(btn);
+  });
+  renderTreemap('ALL');
+  window.addEventListener('resize', () => {
+    if (!document.querySelector('.page[data-page="brand-map"]').classList.contains('active')) return;
+    const active = filters.querySelector('[aria-pressed="true"]');
+    const idx = Array.from(filters.children).indexOf(active);
+    renderTreemap(keys[idx]);
+  });
+}
+
+/* ---------------- trend line chart ---------------- */
+function renderTrend(mode) {
+  const root = document.getElementById('trend-root');
+  root.innerHTML = '';
+  const w = Math.max(root.clientWidth, 300), h = 320;
+  const padL = 56, padR = 16, padT = 16, padB = 28;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+
+  let series;
+  if (mode === 'TOTAL') {
+    series = [{key: 'TOTAL', label: 'Total', color: 'var(--accent-navy)', points: DATA.trend_monthly_total}];
+  } else {
+    series = Object.keys(DATA.trend_monthly_by_retailer).map(ret => ({
+      key: ret, label: RETAILER_LABEL[ret], color: RETAILER_COLOR[ret], points: DATA.trend_monthly_by_retailer[ret]
+    }));
+  }
+  const allPoints = series.flatMap(s => s.points);
+  const maxV = Math.max(...allPoints.map(p => p.value_sales));
+  const n = series[0].points.length;
+  const xAt = i => padL + (plotW * i / (n - 1));
+  const yAt = v => padT + plotH - (plotH * v / (maxV * 1.08));
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('width', '100%'); svg.setAttribute('height', h);
+  svg.style.overflow = 'visible';
+
+  // gridlines
+  const gridSteps = 4;
+  for (let g = 0; g <= gridSteps; g++) {
+    const v = (maxV * 1.08) * g / gridSteps;
+    const y = yAt(v);
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', padL); line.setAttribute('x2', w - padR);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', 'var(--grid)'); line.setAttribute('stroke-width', '1');
+    svg.appendChild(line);
+    const label = document.createElementNS(svgNS, 'text');
+    label.setAttribute('x', padL - 8); label.setAttribute('y', y + 4);
+    label.setAttribute('text-anchor', 'end'); label.setAttribute('font-size', '10.5');
+    label.setAttribute('fill', 'var(--text-muted)');
+    label.textContent = fmtGBPCompact(v);
+    svg.appendChild(label);
+  }
+
+  series.forEach(s => {
+    let pathSolid = '', pathDash = '';
+    s.points.forEach((p, i) => {
+      const x = xAt(i), y = yAt(p.value_sales);
+      const cmd = (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+      if (p.partial_month) pathDash += (pathSolid.slice(-1) === ' ' && i>0 ? 'M' + xAt(i-1) + ',' + yAt(s.points[i-1].value_sales) + ' L' : (i===0?'M':'L')) + x + ',' + y + ' ';
+      else pathSolid += cmd;
+    });
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', pathSolid.trim());
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', s.color);
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    if (pathDash) {
+      const dpath = document.createElementNS(svgNS, 'path');
+      dpath.setAttribute('d', pathDash.trim());
+      dpath.setAttribute('fill', 'none');
+      dpath.setAttribute('stroke', s.color);
+      dpath.setAttribute('stroke-width', '2');
+      dpath.setAttribute('stroke-dasharray', '4 3');
+      dpath.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(dpath);
+    }
+    // end marker
+    const last = s.points[s.points.length - 1];
+    const dot = document.createElementNS(svgNS, 'circle');
+    dot.setAttribute('cx', xAt(n-1)); dot.setAttribute('cy', yAt(last.value_sales));
+    dot.setAttribute('r', 4.5); dot.setAttribute('fill', s.color);
+    dot.setAttribute('stroke', 'var(--chart-surface)'); dot.setAttribute('stroke-width', '2');
+    svg.appendChild(dot);
+  });
+
+  // hover crosshair + hit layer
+  const hitRect = document.createElementNS(svgNS, 'rect');
+  hitRect.setAttribute('x', padL); hitRect.setAttribute('y', padT);
+  hitRect.setAttribute('width', plotW); hitRect.setAttribute('height', plotH);
+  hitRect.setAttribute('fill', 'transparent');
+  const crosshair = document.createElementNS(svgNS, 'line');
+  crosshair.setAttribute('y1', padT); crosshair.setAttribute('y2', padT + plotH);
+  crosshair.setAttribute('stroke', 'var(--text-muted)'); crosshair.setAttribute('stroke-width', '1');
+  crosshair.style.opacity = 0;
+  svg.appendChild(crosshair);
+  svg.appendChild(hitRect);
+
+  const tooltip = document.getElementById('trend-tooltip');
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function showTooltip(evt) {
+    const rect = svg.getBoundingClientRect();
+    const px = evt.clientX - rect.left;
+    const scaledX = (px / rect.width) * w;
+    let idx = Math.round(((scaledX - padL) / plotW) * (n - 1));
+    idx = Math.max(0, Math.min(n - 1, idx));
+    const x = xAt(idx);
+    crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x);
+    crosshair.style.opacity = 1;
+    const pt0 = series[0].points[idx];
+    let html = `<div style="font-weight:700;margin-bottom:4px;">${monthNames[pt0.month-1]} ${pt0.year}${pt0.partial_month ? ' (partial)' : ''}</div>`;
+    series.forEach(s => {
+      const p = s.points[idx];
+      html += `<div class="tt-row"><span class="tt-key" style="background:${s.color}"></span>${s.label}: <span class="tt-val">${fmtGBPCompact(p.value_sales)}</span></div>`;
+    });
+    tooltip.innerHTML = html;
+    tooltip.style.opacity = 1;
+    tooltip.style.left = rect.left + (x / w) * rect.width + 'px';
+    tooltip.style.top = rect.top + window.scrollY - 10 + 'px';
+  }
+  hitRect.addEventListener('pointermove', showTooltip);
+  hitRect.addEventListener('pointerleave', () => { tooltip.style.opacity = 0; crosshair.style.opacity = 0; });
+
+  root.appendChild(svg);
+
+  const legend = document.getElementById('trend-legend');
+  legend.innerHTML = '';
+  if (series.length > 1) {
+    series.forEach(s => {
+      legend.innerHTML += `<span class="legend-item"><span class="legend-swatch line" style="background:${s.color}"></span>${s.label}</span>`;
+    });
+  }
+}
+// Deferred, same reasoning as initTreemap above - #trend-root has 0 width
+// until the "Trend" page is actually visible.
+function initTrend(){
+  const filters = document.getElementById('trend-filters');
+  ['TOTAL','BY_RETAILER'].forEach((mode, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'pill-btn'; btn.type = 'button';
+    btn.textContent = mode === 'TOTAL' ? 'Total' : 'By retailer';
+    btn.setAttribute('aria-pressed', i===0 ? 'true':'false');
+    btn.addEventListener('click', () => {
+      filters.querySelectorAll('.pill-btn').forEach(b=>b.setAttribute('aria-pressed','false'));
+      btn.setAttribute('aria-pressed','true');
+      renderTrend(mode);
+    });
+    filters.appendChild(btn);
+  });
+  renderTrend('TOTAL');
+  window.addEventListener('resize', () => {
+    if (!document.querySelector('.page[data-page="trend"]').classList.contains('active')) return;
+    const active = filters.querySelector('[aria-pressed="true"]').textContent === 'Total' ? 'TOTAL' : 'BY_RETAILER';
+    renderTrend(active);
+  });
+}
+
+/* ---------------- nav controller ---------------- */
+(function initNav(){
+  let treemapReady = false, trendReady = false;
+  const navItems = document.querySelectorAll('.nav-item');
+  function showPage(pageId) {
+    document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.dataset.page === pageId));
+    navItems.forEach(n => n.classList.toggle('active', n.dataset.page === pageId));
+    if (pageId === 'brand-map' && !treemapReady) { initTreemap(); treemapReady = true; }
+    if (pageId === 'trend' && !trendReady) { initTrend(); trendReady = true; }
+    try { window.scrollTo({top: 0, behavior: 'instant'}); } catch (e) { /* not implemented in some test/embed environments */ }
+  }
+  navItems.forEach(item => item.addEventListener('click', () => showPage(item.dataset.page)));
+  showPage('overview');
+})();
+
+/* ---------------- predictions ---------------- */
+(function renderPredictions(){
+  const grid = document.getElementById('pred-grid');
+  const nameMap = Object.assign({TOTAL: 'Total'}, RETAILER_LABEL, CAT_LABEL);
+  DATA.predictions.forEach(p => {
+    const dcls = deltaClass(p.slope_pct_per_week);
+    const fit = p.r_squared === null ? 'n/a' : p.r_squared >= 0.6 ? 'Strong fit' : p.r_squared >= 0.3 ? 'Moderate fit' : 'Weak fit';
+    const fitColor = p.r_squared === null ? 'var(--text-muted)' : p.r_squared >= 0.6 ? 'var(--good)' : p.r_squared >= 0.3 ? 'var(--accent-gold)' : 'var(--bad)';
+    const el = document.createElement('div');
+    el.className = 'pred-card';
+    el.innerHTML = `
+      <div class="pred-name">${nameMap[p.series] || p.series}</div>
+      <div class="pred-value" style="color:${dcls==='up'?'var(--good)':dcls==='down'?'var(--bad)':'var(--text-muted)'}">
+        <span class="arrow">${deltaArrow(p.slope_pct_per_week)}</span><span class="n">${fmtPct(p.slope_pct_per_week, true)}</span><span style="font-size:11px;color:var(--text-muted)">/wk</span>
+      </div>
+      <div class="pred-fit"><span class="fit-pill" style="background:${fitColor};color:#fff">${fit}</span> · R² ${p.r_squared !== null ? p.r_squared.toFixed(2) : '—'} · ${p.weeks_used} wks</div>
+    `;
+    grid.appendChild(el);
+  });
+})();
+</script>

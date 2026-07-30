@@ -1,0 +1,8 @@
+snowflake-connector-python
+python-dotenv
+cryptography
+streamlit
+plotly
+pandas
+numpy
+anthropic

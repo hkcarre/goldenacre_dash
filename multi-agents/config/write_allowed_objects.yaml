@@ -1,0 +1,54 @@
+# Nothing in Snowflake is write-approved yet. This file is deliberately near-empty
+# until the target Vithit development location is confirmed - see
+# docs/OPEN_QUESTIONS.md Q-001. Filling in placeholder values here would violate
+# "Do not invent values for unresolved configuration" (spec section 7).
+
+write_allowed:
+  filesystem:
+    - path: multi-agents/
+      note: >
+        This repository's own working area - config, docs, artifacts, agents,
+        models, audits, tests, macros, scripts subfolders. Freely writable.
+      excludes:
+        - multi-agents/interbev-repo-readonly/   # read-only clone, see read_only_objects.yaml
+
+  snowflake:
+    - status: UNCONFIRMED
+      reason: >
+        VITHIT.TRANSFORM already contains unrelated production objects from an
+        earlier session (FLAVOURED_CARBONATES_*_CLEAN, MASTER_FLAV_CARB,
+        HC_* harmonized tables for AMBIENT_JUICE_DRINKS/MINERAL_WATER/
+        NON_FLAVOURED_CARBONATES). Using VITHIT.TRANSFORM as-is for this
+        exercise's experimental models risks naming collisions or confusion
+        with that unrelated work. A separate schema (e.g. VITHIT.TRANSFORM_EXPERIMENTAL
+        or a dedicated sandbox database) may be more appropriate - see
+        docs/OPEN_QUESTIONS.md Q-001. No Snowflake write target is approved
+        until this is resolved.
+
+    - status: APPROVED
+      database: GOLDENACRE
+      schema: TRANSFORM
+      object_prefix: "HC_"
+      approved_on: "2026-07-29"
+      reason: >
+        Explicit user request (Helena) to build a new, additive harmonization
+        layer for Golden Acre in GOLDENACRE.TRANSFORM, sourced from
+        GOLDENACRE.LANDING, using the same multi-agent process proven on
+        Vithit's HC2_ build. Confirmed via live INFORMATION_SCHEMA/SHOW TABLES/
+        SHOW VIEWS check on 2026-07-29 that no object anywhere in GOLDENACRE
+        currently starts with HC_, so this prefix is collision-free.
+      scope: >
+        Only CREATE (OR REPLACE) TABLE statements targeting object names that
+        start with HC_ in GOLDENACRE.TRANSFORM. Never touches CLEANASDA,
+        CLEANMORRISON, CLEANSAINSBURY, CLEANTESCO, MASTER, REFERENCE (existing
+        sqlmesh-managed views in the same schema - see read_only_objects.yaml),
+        never touches GOLDENACRE.OUTPUT, and never touches the sqlmesh/
+        sqlmesh__TRANSFORM/sqlmesh__OUTPUT/sqlmesh__SQLMESH_EXAMPLE schemas.
+      objects_built:
+        - HC_ASDA_CLEAN
+        - HC_MORRISONS_CLEAN
+        - HC_SAINSBURY_CLEAN
+        - HC_TESCO_CLEAN
+        - HC_REFERENCE_CLEAN
+        - HC_PERIOD_DIM_CLEAN
+        - HC_MASTER

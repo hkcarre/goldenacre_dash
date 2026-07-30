@@ -1,0 +1,95 @@
+# Every object below must only ever be touched with SHOW, DESCRIBE, GET_DDL,
+# INFORMATION_SCHEMA queries, or read-only SELECT. No write verb (see
+# client_boundaries.yaml prohibited_operations) may target any of these.
+
+read_only:
+  - database: INTERBEV
+    schemas:
+      LANDING:
+        tables:
+          - BWS_AGGREGATED_DATA
+          - BWS_CHARACTERISTICS_REF
+          - BWS_FACTS_REF
+          - BWS_HIERARCHIES_REF
+          - BWS_MARKET_DIM
+          - BWS_PERIOD_DIM
+          - BWS_PRODUCT_DIM
+          - _LOG
+      TRANSFORM:
+        views:
+          - AGGREGATEDCLEAN       # not source-controlled - see docs/interbev/interbev_lineage.md
+          - BWS_AGGREGATE_FACTS
+          - BWS_MARKET_DIM
+          - BWS_MASTER             # not source-controlled
+          - BWS_PERIOD_DIM
+          - BWS_PRODUCT_DIM
+          - MASTERCLEAN            # not source-controlled
+          - PERIODCLEAN            # not source-controlled
+          - PRODUCTCLEAN           # not source-controlled
+      OUTPUT:
+        views:
+          - BWS_DASHBOARD          # live Power BI source, likely (SELECT granted to INTERBEV_VIEWER_ROLE)
+      sqlmesh:
+        tables: [_auto_restatements, _environment_statements, _environments, _intervals, _snapshots, _versions]
+      sqlmesh__OUTPUT:
+        tables: [OUTPUT__BWS_DASHBOARD__2264505992]
+      sqlmesh__TRANSFORM:
+        tables:
+          - TRANSFORM__BWS_AGGREGATE_FACTS__1258217775
+          - TRANSFORM__BWS_DASHBOARD__2062652484
+          - TRANSFORM__BWS_DASHBOARD__3392203739
+          - TRANSFORM__BWS_DASHBOARD__497837775
+          - TRANSFORM__BWS_DASHBOARD__948699934
+          - TRANSFORM__BWS_MARKET_DIM__3304523945
+          - TRANSFORM__BWS_MASTER__3050330647
+          - TRANSFORM__BWS_MASTER__3166481692
+          - TRANSFORM__BWS_MASTER__898850445
+          - TRANSFORM__BWS_PERIOD_DIM__1992610398
+          - TRANSFORM__BWS_PERIOD_DIM__2841236058
+          - TRANSFORM__BWS_PERIOD_DIM__3020492079
+          - TRANSFORM__BWS_PERIOD_DIM__3318719650
+          - TRANSFORM__BWS_PERIOD_DIM__3934645974
+          - TRANSFORM__BWS_PRODUCT_DIM__3067975127
+
+  - repository: https://github.com/optiadata/interbev/
+    branch: main
+    rule: never push, never open a PR, never modify any file in the local
+      read-only clone (multi-agents/interbev-repo-readonly/) beyond git's
+      own read operations (fetch/pull/log/show).
+
+  - database: GOLDENACRE
+    note: >
+      Real, separate, sqlmesh-managed production pipeline feeding a live
+      Power BI dashboard. Only SHOW, DESCRIBE, GET_DDL, INFORMATION_SCHEMA,
+      or read-only SELECT may ever target these. The only write-approved
+      objects anywhere in GOLDENACRE are the new HC_-prefixed tables in
+      TRANSFORM - see write_allowed_objects.yaml.
+    schemas:
+      LANDING:
+        tables:
+          - ASDA
+          - MORRISONS
+          - SAINSBURY
+          - TESCO
+          - REFERENCE_DATABASE
+          - _LOG
+      TRANSFORM:
+        views:
+          - CLEANASDA
+          - CLEANMORRISON
+          - CLEANSAINSBURY
+          - CLEANTESCO
+          - MASTER
+          - REFERENCE
+      OUTPUT:
+        views:
+          - DASHBOARD
+          - EMPTY
+          - HALAL
+          - OTHER
+          - POLISH
+      sqlmesh: all objects   # physical schema backing the sqlmesh-managed views above
+      sqlmesh__TRANSFORM: all objects
+      sqlmesh__OUTPUT: all objects
+      sqlmesh__SQLMESH_EXAMPLE: all objects
+      SQLMESH_EXAMPLE: all objects   # unused demo schema, not client data, still not ours to touch

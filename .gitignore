@@ -1,0 +1,8 @@
+# Never commit credentials, even if someone copies a local .env in here later
+.env
+.env.*
+*.p8
+*.pub
+__pycache__/
+*.pyc
+.streamlit/
