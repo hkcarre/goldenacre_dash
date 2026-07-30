@@ -23,22 +23,40 @@ import os
 os.environ.pop("SSLKEYLOGFILE", None)
 
 import sys
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
-sys.path.insert(0, r"c:\Users\helen\Projects\snowflake\multi-agents\scripts")
+# Relative to this file, not a hardcoded local path - the original absolute
+# Windows path only worked on the machine that wrote it. Streamlit Community
+# Cloud clones this repo to a fresh Linux path, so anything hardcoded here
+# would crash on import before the app even starts.
+_APP_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_APP_DIR / "multi-agents" / "scripts"))
 import goldenacre_analytics_engine as engine
 import goldenacre_pulp
 from goldenacre_theme import (
     inject_global_css, render_header, render_hero, render_metric_tile, render_badge,
-    render_insight_card, render_sidebar_brand, COLORS, RETAILER_COLOR, RETAILER_LABEL,
-    CATEGORY_COLOR, CATEGORY_LABEL,
+    render_insight_card, render_sidebar_brand, render_powered_by_credit, COLORS,
+    RETAILER_COLOR, RETAILER_LABEL, CATEGORY_COLOR, CATEGORY_LABEL,
 )
 
 load_dotenv()
+
+# On Streamlit Community Cloud there's no .env file - secrets are pasted into
+# the app's Secrets panel instead, exposed via st.secrets. Mirror them into
+# os.environ so snowflake_connection.py, goldenacre_pulp.py etc. can keep
+# reading plain env vars either way, without knowing which environment they're
+# in. Wrapped defensively: st.secrets raises if no secrets.toml exists at all
+# (the normal case for local dev), which must not crash the app.
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:
+    pass
 
 st.set_page_config(page_title="Golden Acre Foods - Retail Analytics", layout="wide", page_icon="\U0001F4CA")
 
@@ -103,15 +121,21 @@ def cached_predictions():
     return engine.load_predictions(conn())
 
 
+@st.cache_data(ttl=600)
+def cached_manufacturer_view():
+    return engine.load_manufacturer_view(conn())
+
+
 kpis = cached_kpis()
 retailer_share = cached_retailer_share()
 category_share = cached_category_share()
 top_brands = cached_top_brands()
+manufacturer_view = cached_manufacturer_view()
 monthly_trend = cached_monthly_trend()
 predictions = cached_predictions()
 
 # ---------- left-nav sidebar ----------
-PAGES = ["Overview", "Market Share", "Top Brands", "Brand Map", "Trend", "Predictions", "Insights", "Ask Sprout"]
+PAGES = ["Overview", "Market Share", "Top Brands", "Brand Map", "Trend", "Predictions", "Insights", "Golden Acre View", "Ask Sprout"]
 with st.sidebar:
     st.markdown(render_sidebar_brand(), unsafe_allow_html=True)
     page = st.radio("Navigate", PAGES, label_visibility="collapsed")
@@ -120,6 +144,7 @@ with st.sidebar:
         f"font-size:11px;color:rgba(255,255,255,0.55);'>ASDA &middot; Morrisons &middot; Sainsbury's &middot; Tesco</div>",
         unsafe_allow_html=True,
     )
+    st.markdown(render_powered_by_credit(), unsafe_allow_html=True)
 
 st.markdown(
     render_header(
@@ -169,6 +194,23 @@ if page == "Overview":
             sub=f"{kpis['unmatched_value_sales_mat_pct']:.1f}% of MAT value unmatched",
         ), unsafe_allow_html=True)
 
+    ga_share = manufacturer_view["golden_acre_share"]
+    ga_corr = manufacturer_view["najma_rank_correction"]
+    st.markdown(
+        f"""<div style="margin-top:18px;padding:16px 20px;border-radius:12px;
+             background:{COLORS['gold_bg']};border:1px solid {COLORS['gold']};
+             display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+          <div style="font-size:14px;color:{COLORS['text']};">
+            <strong>Your brands, in this data.</strong> Najma + Jaldee Eats hold a combined
+            <strong>{ga_share['share_mat_pct']:.1f}% share of Halal</strong>
+            ({'+' if ga_share['share_point_change'] > 0 else ''}{ga_share['share_point_change']:.2f}pp vs MAT YA).
+            Najma ranks <strong>#{ga_corr['corrected_rank']}</strong> among Halal brands at
+            £{ga_corr['corrected_value_mat']/1e6:.1f}m &mdash; see Golden Acre View for the full breakdown.
+          </div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
 # ============================================================ Market Share ============================================================
 elif page == "Market Share":
     st.subheader("Value sales by retailer & category")
@@ -199,6 +241,19 @@ elif page == "Market Share":
                            legend_title_text="")
         st.plotly_chart(fig, use_container_width=True)
 
+    st.markdown("**Golden Acre's share, by retailer**")
+    st.caption("Najma + Jaldee Eats combined, share of each retailer's own Halal category - a different question from the four-retailer totals above.")
+    ga_df = pd.DataFrame(manufacturer_view["by_retailer_share"]).sort_values("ga_share_mat_pct", ascending=True)
+    ga_df["label"] = ga_df.retailer.map(RETAILER_LABEL)
+    fig = px.bar(
+        ga_df, x="ga_share_mat_pct", y="label", orientation="h",
+        labels={"ga_share_mat_pct": "Golden Acre share of Halal (%)", "label": ""},
+        text=ga_df["share_point_change"].map(lambda v: f"{'+' if v > 0 else ''}{v:.2f}pp"),
+    )
+    fig.update_traces(marker_color=COLORS["gold"])
+    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=240, margin=dict(l=0, r=10, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
 # ============================================================ Top Brands ============================================================
 elif page == "Top Brands":
     st.subheader("Top 10 brands by value sales")
@@ -212,6 +267,14 @@ elif page == "Top Brands":
     fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=420, margin=dict(l=0, r=10, t=10, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
+    ga_corr = manufacturer_view["najma_rank_correction"]
+    st.info(
+        f"Neither Najma nor Jaldee Eats appears above - that list ranks brands across ALL categories and is "
+        f"dominated by retailers' own private-label buckets, not evidence Golden Acre is a small player. "
+        f"Within its own category, Halal, Najma is the **#{ga_corr['corrected_rank']}-largest brand** at "
+        f"£{ga_corr['corrected_value_mat']/1e6:.1f}m MAT - see Golden Acre View for the full ranking."
+    )
+
 # ============================================================ Brand Map ============================================================
 elif page == "Brand Map":
     st.subheader("Category & brand map")
@@ -220,6 +283,20 @@ elif page == "Brand Map":
     retailer_key = None if retailer_choice == "All retailers" else next(r for r in engine.RETAILERS if RETAILER_LABEL[r] == retailer_choice)
     tree_df = cached_treemap(retailer_key)
     tree_df["category_label"] = tree_df.category.map(CATEGORY_LABEL)
+
+    # Najma's naive GA_BUYER='HALAL' total understates it (see Golden Acre View) -
+    # swap in the corrected value/growth here too, so this page agrees with the
+    # rest of the app instead of quietly showing the smaller, wrong figure.
+    najma_correction = (
+        manufacturer_view["najma"] if retailer_key is None
+        else next((r for r in manufacturer_view["najma"]["by_retailer"] if r["retailer"] == retailer_key), None)
+    )
+    najma_mask = tree_df.brand == "NAJMA"
+    if najma_correction and najma_mask.any():
+        tree_df.loc[najma_mask, "value_sales_mat"] = najma_correction["value_sales_mat"]
+        tree_df.loc[najma_mask, "change_pct"] = najma_correction["value_yoy_pct"]
+        tree_df.loc[najma_mask, "brand"] = "\U0001F31F Najma (corrected)"
+
     fig = px.treemap(
         tree_df, path=["category_label", "brand"], values="value_sales_mat", color="change_pct",
         color_continuous_scale=["#B23A3A", "#D8D5CB", "#1F7A45"], color_continuous_midpoint=0,
@@ -227,29 +304,66 @@ elif page == "Brand Map":
     )
     fig.update_layout(height=560, margin=dict(l=0, r=0, t=10, b=0))
     st.plotly_chart(fig, use_container_width=True)
+    st.caption("\U0001F31F = Golden Acre-owned (Najma), value corrected for the reference-match gap - see Golden Acre View.")
 
 # ============================================================ Trend ============================================================
 elif page == "Trend":
     st.subheader("Monthly value sales")
-    trend_view = st.radio("View", ["Total", "By retailer"], horizontal=True)
-    mt = monthly_trend.copy()
-    mt["date"] = pd.to_datetime(dict(year=mt.YEAR, month=mt.MONTH_NUMBER, day=1))
-    if trend_view == "Total":
-        agg = mt.groupby("date", as_index=False).agg(VALUE_SALES=("VALUE_SALES", "sum"), PARTIAL_MONTH=("PARTIAL_MONTH", "max"))
-        fig = px.line(agg, x="date", y="VALUE_SALES", labels={"VALUE_SALES": "Value sales (£)", "date": ""})
-        fig.update_traces(line_color=COLORS["primary"])
+    trend_view = st.radio("View", ["Total", "By retailer", "Golden Acre", "Golden Acre by retailer"], horizontal=True)
+    if trend_view in ("Total", "By retailer"):
+        mt = monthly_trend.copy()
+        mt["date"] = pd.to_datetime(dict(year=mt.YEAR, month=mt.MONTH_NUMBER, day=1))
+        if trend_view == "Total":
+            agg = mt.groupby("date", as_index=False).agg(VALUE_SALES=("VALUE_SALES", "sum"), PARTIAL_MONTH=("PARTIAL_MONTH", "max"))
+            fig = px.line(agg, x="date", y="VALUE_SALES", labels={"VALUE_SALES": "Value sales (£)", "date": ""})
+            fig.update_traces(line_color=COLORS["primary"])
+        else:
+            mt["label"] = mt.RETAILER.map(RETAILER_LABEL)
+            fig = px.line(mt, x="date", y="VALUE_SALES", color="RETAILER", color_discrete_map=RETAILER_COLOR,
+                          labels={"VALUE_SALES": "Value sales (£)", "date": "", "RETAILER": ""})
+    elif trend_view == "Golden Acre":
+        ga_mt = pd.DataFrame(manufacturer_view["trend_monthly_golden_acre"])
+        ga_mt["date"] = pd.to_datetime(dict(year=ga_mt.year, month=ga_mt.month, day=1))
+        fig = px.line(ga_mt, x="date", y="value_sales", labels={"value_sales": "Najma + Jaldee Eats value sales (£)", "date": ""})
+        fig.update_traces(line_color=COLORS["gold"])
     else:
-        mt["label"] = mt.RETAILER.map(RETAILER_LABEL)
-        fig = px.line(mt, x="date", y="VALUE_SALES", color="RETAILER", color_discrete_map=RETAILER_COLOR,
-                      labels={"VALUE_SALES": "Value sales (£)", "date": "", "RETAILER": ""})
+        rows = []
+        for ret, points in manufacturer_view["trend_monthly_golden_acre_by_retailer"].items():
+            for p in points:
+                rows.append({**p, "RETAILER": ret})
+        ga_mt = pd.DataFrame(rows)
+        ga_mt["date"] = pd.to_datetime(dict(year=ga_mt.year, month=ga_mt.month, day=1))
+        fig = px.line(ga_mt, x="date", y="value_sales", color="RETAILER", color_discrete_map=RETAILER_COLOR,
+                      labels={"value_sales": "Value sales (£)", "date": "", "RETAILER": ""})
     fig.update_layout(plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=440, margin=dict(l=0, r=10, t=10, b=10))
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("The final month is a partial period (data cuts off mid-month) - treat it as incomplete, not a real month-on-month drop.")
+    if trend_view == "Golden Acre by retailer":
+        st.caption("Tesco's line includes Jaldee Eats (Tesco-only); the other three retailers are Najma alone. The final month is a partial period.")
+    else:
+        st.caption("The final month is a partial period (data cuts off mid-month) - treat it as incomplete, not a real month-on-month drop.")
 
 # ============================================================ Predictions ============================================================
 elif page == "Predictions":
     st.subheader("Trailing 12-week momentum")
     st.caption("A naive straight-line fit over the last 12 weeks, expressed as %/week - a directional read, not a statistical forecast. R² tells you how much to trust the direction.")
+
+    st.markdown("**Golden Acre's own momentum**")
+    ga_cols = st.columns(3)
+    ga_trend = manufacturer_view["trend"]
+    for col, (label, key) in zip(ga_cols, [("\U0001F31F Najma", "najma"), ("\U0001F31F Jaldee Eats", "jaldee_eats")]):
+        row = ga_trend[key]
+        with col:
+            slope, r2 = row["slope_pct_per_week"], row["r_squared"]
+            fit = "n/a" if r2 is None else ("Strong" if r2 >= 0.6 else "Moderate" if r2 >= 0.3 else "Weak")
+            st.metric(label, f"{slope:+.1f}%/wk" if slope is not None else "n/a",
+                      help=f"R²={r2:.2f}, {fit} fit, {row['weeks_used']} weeks" if r2 is not None else "insufficient data")
+    cat_row = ga_trend["category"]
+    st.caption(
+        f"Halal category overall is at {cat_row['slope_pct_per_week']:+.1f}%/wk (R²={cat_row['r_squared']:.2f}) - "
+        "Najma's decline is shallower than the category's, consistent with the share gain in Golden Acre View."
+    )
+    st.markdown("---")
+    st.markdown("**Retailer & category momentum**")
     name_map = {**RETAILER_LABEL, **CATEGORY_LABEL, "TOTAL": "Total"}
     for row_start in range(0, len(predictions), 3):
         cols = st.columns(3)
@@ -280,18 +394,133 @@ elif page == "Insights":
     for i, html in enumerate(insights_html, start=1):
         st.markdown(render_insight_card(i, html), unsafe_allow_html=True)
 
+    ga_share = manufacturer_view["golden_acre_share"]
+    ga_corr = manufacturer_view["najma_rank_correction"]
+    ga_html = (
+        f"<strong>Golden Acre is gaining share in a shrinking category.</strong> Halal overall is down "
+        f"{abs(manufacturer_view['category_total']['value_yoy_pct']):.1f}% MAT, but Najma + Jaldee Eats' combined "
+        f"share rose {'+' if ga_share['share_point_change'] > 0 else ''}{ga_share['share_point_change']:.2f}pp - and "
+        f"gained share in every retailer it's listed in, not just on average. Najma's true rank is #{ga_corr['corrected_rank']} "
+        f"(not #{ga_corr['naive_rank']} - see Golden Acre View for why), and the clearest near-term lever isn't demand, "
+        f"it's distribution: Jaldee Eats is Tesco-only while Najma is already established in the other three retailers."
+    )
+    st.markdown(render_insight_card("\U0001F31F", ga_html), unsafe_allow_html=True)
+
+# ============================================================ Golden Acre View ============================================================
+elif page == "Golden Acre View":
+    st.subheader("Golden Acre's own brands vs. the market")
+    st.caption(
+        "Everything on the other pages treats Golden Acre as the analytics platform, not a competitor. This page "
+        "flips the lens. Retail scan data has no manufacturer column, so which brands Golden Acre owns is external "
+        "knowledge from its own \"Our Brands\" page - only Najma and Jaldee Eats are sold through ASDA/Morrisons/"
+        "Sainsbury's/Tesco and so appear here; Elsinore, Acti-Shake and Golden Acre Yogurts are confirmed absent "
+        "(checked directly). Both brands sit in Halal, so that's the competitive set below."
+    )
+
+    ga_share = manufacturer_view["golden_acre_share"]
+    ga_corr = manufacturer_view["najma_rank_correction"]
+    najma, jaldee = manufacturer_view["najma"], manufacturer_view["jaldee_eats"]
+    ref_match = manufacturer_view["najma_reference_match"]
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(render_metric_tile(
+            "Combined share of Halal", f"{ga_share['share_mat_pct']:.1f}%",
+            f"{'+' if ga_share['share_point_change'] > 0 else ''}{ga_share['share_point_change']:.2f}pp", ga_share["share_point_change"] > 0,
+            f"vs {ga_share['share_mat_ya_pct']:.1f}% MAT YA",
+        ), unsafe_allow_html=True)
+    with m2:
+        st.markdown(render_metric_tile(
+            "Najma value sales (MAT)", f"£{najma['value_sales_mat']/1e6:.1f}m",
+            f"{najma['value_yoy_pct']:+.1f}%", najma["value_yoy_pct"] > 0,
+            f"rank #{ga_corr['corrected_rank']} of Halal brands (corrected)",
+        ), unsafe_allow_html=True)
+    with m3:
+        st.markdown(render_metric_tile(
+            "Jaldee Eats value sales (MAT)", f"£{jaldee['value_sales_mat']/1e3:.0f}k",
+            f"{jaldee['value_yoy_pct']:+.1f}%", jaldee["value_yoy_pct"] > 0,
+            "Tesco only - 1 of 4 retailers",
+        ), unsafe_allow_html=True)
+    with m4:
+        st.markdown(render_metric_tile(
+            "Najma's reference-match rate", f"{ref_match['matched_pct']:.1f}%",
+            sub=f"{100 - ref_match['matched_pct']:.1f}% relies on raw retailer text",
+        ), unsafe_allow_html=True)
+
+    st.markdown("**Where Najma really ranks**")
+    st.caption("Top Halal brands by MAT value sales. Golden Acre's own brand highlighted.")
+    rank_df = pd.DataFrame(manufacturer_view["competitive_set_top12"])
+    rank_df["label"] = rank_df.apply(lambda r: f"#{r['rank']} {r['brand']}" + (" \U0001F31F" if r["is_golden_acre"] else ""), axis=1)
+    fig = px.bar(
+        rank_df.sort_values("rank", ascending=False), x="value_sales_mat", y="label", orientation="h",
+        color="is_golden_acre", color_discrete_map={True: COLORS["gold"], False: COLORS["primary"]},
+        labels={"value_sales_mat": "Value sales (MAT, £)", "label": ""},
+    )
+    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=420, margin=dict(l=0, r=10, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+    next_brand = next((r for r in manufacturer_view["competitive_set_top12"] if r["rank"] == ga_corr["corrected_rank"] + 1), None)
+    st.info(
+        f"**Najma's true rank is #{ga_corr['corrected_rank']}, not #{ga_corr['naive_rank']}.** "
+        f"{ref_match['matched_pct']:.1f}% of Najma's sales sit on the clean, reference-matched \"NAJMA\" brand string "
+        f"(£{ga_corr['naive_value_mat']/1e6:.1f}m MAT) - a plain query stops there and ranks Najma #{ga_corr['naive_rank']}. "
+        f"The remaining {100 - ref_match['matched_pct']:.1f}% sits on SKUs like \"NAJMA HALAL TURKEY\" that failed the same "
+        f"product-reference match - and because category comes from that same match, they also get mis-bucketed as "
+        f"\"Unclassified\" instead of Halal. Folding Najma's brand family back together gives its real MAT value of "
+        f"£{ga_corr['corrected_value_mat']/1e6:.1f}m - #{ga_corr['corrected_rank']}"
+        + (f", ahead of {next_brand['brand']} (£{next_brand['value_sales_mat']/1e6:.1f}m)." if next_brand else ".") +
+        " This correction is applied identically to every brand in the chart above, not just Najma - checked and confirmed."
+    )
+
+    st.markdown("**Retailer distribution & share**")
+    st.caption("Najma + Jaldee Eats combined, share of each retailer's own Halal category.")
+    dist_df = pd.DataFrame(manufacturer_view["by_retailer_share"])
+    dist_df["Retailer"] = dist_df.retailer.map(RETAILER_LABEL)
+    dist_df["Halal category (MAT)"] = dist_df.category_value_mat.map(lambda v: f"£{v/1e6:.1f}m")
+    dist_df["Category YoY"] = dist_df.category_value_yoy_pct.map(lambda v: f"{v:+.1f}%")
+    dist_df["Golden Acre value (MAT)"] = dist_df.ga_value_mat.map(lambda v: f"£{v/1e6:.1f}m")
+    dist_df["GA share (MAT)"] = dist_df.ga_share_mat_pct.map(lambda v: f"{v:.1f}%")
+    dist_df["GA share (MAT YA)"] = dist_df.ga_share_mat_ya_pct.map(lambda v: f"{v:.1f}%")
+    dist_df["Share change"] = dist_df.share_point_change.map(lambda v: f"{'+' if v > 0 else ''}{v:.2f}pp")
+    st.dataframe(
+        dist_df[["Retailer", "Halal category (MAT)", "Category YoY", "Golden Acre value (MAT)", "GA share (MAT)", "GA share (MAT YA)", "Share change"]],
+        hide_index=True, use_container_width=True,
+    )
+
+    st.markdown("**Price positioning**")
+    st.caption("Value ÷ unit sales, MAT. Golden Acre's own brand highlighted.")
+    price_df = rank_df[rank_df.price_per_unit.notna()].head(7)
+    fig = px.bar(
+        price_df.sort_values("price_per_unit"), x="price_per_unit", y="brand", orientation="h",
+        color="is_golden_acre", color_discrete_map={True: COLORS["gold"], False: COLORS["teal"]},
+        labels={"price_per_unit": "Price per unit (£)", "brand": ""},
+    )
+    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=320, margin=dict(l=0, r=10, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("Najma and Lancashire Farm price well below Shazans/Haji Baba/Tariq Halal - a lower-unit-price, higher-volume segment within Halal, not evidence either pricing strategy is \"wrong\".")
+
+    st.markdown("**Whitespace**")
+    st.info(
+        f"**Jaldee Eats is Golden Acre's newest halal range and is sold through Tesco only** "
+        f"(£{jaldee['value_sales_mat']/1e3:.0f}k MAT, {jaldee['value_yoy_pct']:+.1f}% YoY). It has no presence in "
+        "ASDA, Morrisons or Sainsbury's, the same three retailers where Najma is already listed and gaining share. "
+        "That is a plausible listing-expansion opportunity, not a demand problem this data can diagnose on its own."
+    )
+
 # ============================================================ Ask Sprout (full page, real chat) ============================================================
 elif page == "Ask Sprout":
     st.subheader("\U0001F331 Ask Sprout")
     st.caption(
-        f"{goldenacre_pulp.NAME} answers only from the data currently loaded in this app - nothing invented. "
-        "Switch pages to load different data (e.g. the Brand Map's retailer filter) before asking about it."
+        f"{goldenacre_pulp.NAME} answers only from the data loaded into its context below - nothing invented. "
+        "KPIs, retailer/category share, top brands, predictions, and Golden Acre's own brand figures are all "
+        "in scope. The Brand Map's category/brand breakdown is a page-only chart and isn't loaded here yet - "
+        f"{goldenacre_pulp.NAME} will say so rather than guess if you ask about it."
     )
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         st.info(f"{goldenacre_pulp.NAME} isn't switched on yet - add `ANTHROPIC_API_KEY` to `.env` to enable live Q&A.")
     else:
-        sprout_context = goldenacre_pulp.build_context(kpis, retailer_share, category_share, top_brands, predictions)
+        sprout_context = goldenacre_pulp.build_context(kpis, retailer_share, category_share, top_brands, predictions, manufacturer_view)
 
         if "sprout_messages" not in st.session_state:
             st.session_state.sprout_messages = []

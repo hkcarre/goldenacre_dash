@@ -43,8 +43,9 @@ Idempotent: CREATE OR REPLACE TABLE throughout, scoped only to the HC_
 object names below - safe to re-run as LANDING refreshes.
 """
 import sys
+from pathlib import Path
 
-sys.path.insert(0, r"c:\Users\helen\Projects\snowflake")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from snowflake_connection import get_connection
 

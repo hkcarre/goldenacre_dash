@@ -14,11 +14,12 @@ NOT a statistical forecast - the same honesty discipline is kept here on purpose
 """
 import json
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, r"c:\Users\helen\Projects\snowflake")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from snowflake_connection import get_connection
 
 BRAND_EXPR = "COALESCE(NULLIF(GA_BRAND, ''), AC_BRAND)"
@@ -191,12 +192,25 @@ def main():
     def build_treemap_leaves(df_slice):
         mat_slice = df_slice[df_slice.PERIOD_MATX == "MAT"].groupby(["CATEGORY", "BRAND"], as_index=False).VALUE_SALES.sum()
         ya_slice = df_slice[df_slice.PERIOD_MATX == "MAT YA"].groupby(["CATEGORY", "BRAND"]).VALUE_SALES.sum()
+        # "Other"'s prior-year total for the growth %, NOT the sum of ya_slice looked
+        # up only for brands that still have a current-MAT row (the previous version's
+        # bug) - a brand with MAT YA sales but zero current MAT sales in that category
+        # simply has no row in mat_slice at all, so it silently dropped out of "rest"
+        # and its prior value never got counted, understating rest_prior and making
+        # "Other"'s decline look smaller than it really was (found by an independent
+        # QA agent re-deriving every treemap number from Snowflake - wrong in 7 of 20
+        # cases, the tile's own VALUE was always right, only this YoY% was off).
+        # Fix: category's true prior total minus the CURRENT top5's prior total -
+        # correct regardless of which specific brands moved in/out of the long tail.
+        ya_cat_totals = df_slice[df_slice.PERIOD_MATX == "MAT YA"].groupby("CATEGORY").VALUE_SALES.sum()
         leaves = []
         for cat, g in mat_slice.groupby("CATEGORY"):
             g = g.sort_values("VALUE_SALES", ascending=False)
             top5, rest = g.head(5), g.iloc[5:]
+            top5_prior_sum = 0.0
             for _, row in top5.iterrows():
                 prior = ya_slice.get((cat, row.BRAND))
+                top5_prior_sum += float(prior) if prior is not None else 0.0
                 leaves.append({
                     "category": cat, "brand": row.BRAND,
                     "value_sales_mat": round(float(row.VALUE_SALES), 2),
@@ -204,7 +218,7 @@ def main():
                 })
             if len(rest):
                 rest_mat = float(rest.VALUE_SALES.sum())
-                rest_prior = sum(float(ya_slice.get((cat, b), 0) or 0) for b in rest.BRAND)
+                rest_prior = float(ya_cat_totals.get(cat, 0) or 0) - top5_prior_sum
                 leaves.append({
                     "category": cat, "brand": "Other",
                     "value_sales_mat": round(rest_mat, 2),

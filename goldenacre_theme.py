@@ -29,6 +29,8 @@ from pathlib import Path
 
 _ASSETS = Path(__file__).parent / "assets"
 _LOGO_SVG = (_ASSETS / "goldenacre_logo.svg").read_text(encoding="utf-8") if (_ASSETS / "goldenacre_logo.svg").exists() else ""
+_OPTIA_LOGO_PATH = _ASSETS / "optia_logo_white.svg"
+_OPTIA_LOGO_SVG = _OPTIA_LOGO_PATH.read_text(encoding="utf-8") if _OPTIA_LOGO_PATH.exists() else ""
 
 
 def _font_b64(name):
@@ -138,6 +140,19 @@ def inject_global_css():
     [data-testid="stSidebar"] .stRadio label[data-checked="true"],
     [data-testid="stSidebar"] .stRadio [aria-checked="true"] {{ background: {c['gold']}; }}
     [data-testid="stSidebarNav"] {{ display: none; }}
+
+    /* ---- "Powered by Optia" credit, bottom of sidebar ---- */
+    .op-credit {{
+        display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 14px;
+        border-top: 1px solid rgba(255,255,255,0.14); text-decoration: none !important;
+    }}
+    .op-credit .op-label {{
+        font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+        color: rgba(255,255,255,0.5); white-space: nowrap;
+    }}
+    .op-credit .op-logo-wrap {{ display: block; opacity: 0.85; transition: opacity 0.15s ease; }}
+    .op-credit:hover .op-logo-wrap {{ opacity: 1; }}
+    .op-credit .op-logo-wrap svg {{ height: 12px; width: auto; display: block; }}
     </style>
     """
 
@@ -149,6 +164,23 @@ def render_sidebar_brand():
     <div style="padding:6px 4px 18px;display:flex;align-items:center;gap:8px;">
         {_LOGO_SVG}
     </div>
+    """
+
+
+def render_powered_by_credit():
+    """"Powered by Optia" credit for the bottom of the sidebar, below the retailer-scope
+    line - not a fixed floating badge like vithit's (this sidebar already pins an "as of"
+    footer to the same corner via margin-top:auto, so a fixed overlay would sit on top of
+    it); sits in normal flow instead. Uses Optia's new white lockup, which is why this
+    reads as a plain mark rather than vithit's coloured animated-circle treatment - that
+    circle's indigo brand colour doesn't exist in this asset."""
+    if not _OPTIA_LOGO_SVG:
+        return ""
+    return f"""
+    <a class="op-credit" href="https://optiadata.com" target="_blank" rel="noopener noreferrer">
+        <span class="op-label">Powered by</span>
+        <span class="op-logo-wrap">{_OPTIA_LOGO_SVG}</span>
+    </a>
     """
 
 

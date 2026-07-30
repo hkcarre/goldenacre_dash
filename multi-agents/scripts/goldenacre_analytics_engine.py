@@ -15,11 +15,14 @@ multi-agents/docs/goldenacre/goldenacre_target_architecture.md), never the
 client's original sqlmesh-managed production pipeline.
 """
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, r"c:\Users\helen\Projects\snowflake")
+# Relative to this file (repo_root/multi-agents/scripts/), not a hardcoded local
+# path - see the identical fix and rationale in goldenacre_insights_app.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from snowflake_connection import get_connection
 
 BRAND_EXPR = "COALESCE(NULLIF(GA_BRAND, ''), AC_BRAND)"
@@ -222,3 +225,303 @@ def load_predictions(conn):
         slope, r2, n = trend_pct(g.sort_values("TIME_PERIODS").VALUE_SALES.to_numpy())
         rows.append({"series": cat, "slope_pct_per_week": slope, "r_squared": r2, "weeks_used": n})
     return pd.DataFrame(rows)
+
+
+# Golden Acre's own brands (manufacturer view) - ported from
+# multi-agents/scripts/build_goldenacre_manufacturer_view.py, which has the full
+# methodology writeup (which brands are Golden Acre's own, why the category filter
+# alone undercounts Najma, and why the same correction is applied uniformly to
+# every competitor rather than just Golden Acre's own brands). This is queried
+# live rather than reading that script's JSON snapshot, same as every other
+# load_* function here.
+GA_CATEGORY = "HALAL"
+
+
+def _trend_pct(values):
+    """Same maths as load_predictions()'s inline trend_pct - pulled out to a
+    module function so load_manufacturer_view() can reuse it without duplicating
+    the formula (a QA pass on this project has twice caught a copy-pasted
+    calculation drifting from its original - not duplicating it here on purpose)."""
+    y = np.asarray(values, dtype=float)
+    y = y[~np.isnan(y)]
+    if len(y) < 4:
+        return None, None, len(y)
+    y = y[-TRAILING_WEEKS:] if len(y) >= TRAILING_WEEKS else y
+    x = np.arange(len(y))
+    slope, intercept = np.polyfit(x, y, 1)
+    mean = y.mean()
+    if mean == 0:
+        return None, None, len(y)
+    fitted = slope * x + intercept
+    ss_res = np.sum((y - fitted) ** 2)
+    ss_tot = np.sum((y - mean) ** 2)
+    r2 = 1 - ss_res / ss_tot if ss_tot else 0.0
+    return round(slope / mean * 100, 3), round(r2, 3), len(y)
+
+
+def load_manufacturer_view(conn):
+    def brand_family(period, by_retailer=False):
+        cols = "RETAILER, " if by_retailer else ""
+        group = "1, 2" if by_retailer else "1"
+        df = _df(conn, f"""
+            SELECT {cols}CASE WHEN UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'NAJMA%' THEN 'NAJMA' ELSE 'JALDEE EATS' END AS FAMILY,
+                   SUM(VALUE_SALES) AS VALUE_SALES, SUM(UNIT_SALES) AS UNIT_SALES
+            FROM GOLDENACRE.TRANSFORM.HC_MASTER
+            WHERE (UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'NAJMA%' OR UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'JALDEE%')
+              AND PERIOD_MATX = '{period}'
+            GROUP BY {group}
+        """)
+        df["VALUE_SALES"] = df["VALUE_SALES"].astype(float)
+        df["UNIT_SALES"] = df["UNIT_SALES"].astype(float)
+        return df
+
+    fam_mat, fam_ya = brand_family("MAT").set_index("FAMILY"), brand_family("MAT YA").set_index("FAMILY")
+    najma_mat = float(fam_mat.VALUE_SALES.get("NAJMA", 0) or 0)
+    najma_ya = float(fam_ya.VALUE_SALES.get("NAJMA", 0) or 0)
+    najma_units_mat = float(fam_mat.UNIT_SALES.get("NAJMA", 0) or 0)
+    najma_units_ya = float(fam_ya.UNIT_SALES.get("NAJMA", 0) or 0)
+    jaldee_mat = float(fam_mat.VALUE_SALES.get("JALDEE EATS", 0) or 0)
+    jaldee_ya = float(fam_ya.VALUE_SALES.get("JALDEE EATS", 0) or 0)
+    jaldee_units_mat = float(fam_mat.UNIT_SALES.get("JALDEE EATS", 0) or 0)
+    jaldee_units_ya = float(fam_ya.UNIT_SALES.get("JALDEE EATS", 0) or 0)
+
+    fam_mat_ret, fam_ya_ret = brand_family("MAT", True), brand_family("MAT YA", True)
+
+    def by_retailer(family):
+        mat_r = fam_mat_ret[fam_mat_ret.FAMILY == family].set_index("RETAILER")
+        ya_r = fam_ya_ret[fam_ya_ret.FAMILY == family].set_index("RETAILER")
+        rows = []
+        for ret in sorted(set(mat_r.index) | set(ya_r.index)):
+            v_mat = float(mat_r.VALUE_SALES.get(ret, 0) or 0)
+            v_ya = float(ya_r.VALUE_SALES.get(ret, 0) or 0)
+            rows.append({
+                "retailer": ret, "value_sales_mat": v_mat, "value_sales_mat_ya": v_ya,
+                "value_yoy_pct": pct_change(v_mat, v_ya),
+            })
+        return rows
+
+    najma_by_retailer, jaldee_by_retailer = by_retailer("NAJMA"), by_retailer("JALDEE EATS")
+
+    cat = _df(conn, f"""
+        SELECT PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE COALESCE(GA_BUYER,'UNCLASSIFIED') = '{GA_CATEGORY}' AND PERIOD_MATX IN ('MAT','MAT YA')
+        GROUP BY 1
+    """).set_index("PERIOD_MATX").VALUE_SALES
+    cat_mat, cat_ya = float(cat.get("MAT", 0) or 0), float(cat.get("MAT YA", 0) or 0)
+
+    cat_by_retailer = _df(conn, f"""
+        SELECT RETAILER, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE COALESCE(GA_BUYER,'UNCLASSIFIED') = '{GA_CATEGORY}' AND PERIOD_MATX IN ('MAT','MAT YA')
+        GROUP BY 1, 2
+    """)
+    cat_mat_r = cat_by_retailer[cat_by_retailer.PERIOD_MATX == "MAT"].set_index("RETAILER").VALUE_SALES
+    cat_ya_r = cat_by_retailer[cat_by_retailer.PERIOD_MATX == "MAT YA"].set_index("RETAILER").VALUE_SALES
+
+    by_retailer_share = []
+    for ret in sorted(set(cat_mat_r.index) | set(cat_ya_r.index)):
+        c_mat, c_ya = float(cat_mat_r.get(ret, 0) or 0), float(cat_ya_r.get(ret, 0) or 0)
+        najma_r = next((x for x in najma_by_retailer if x["retailer"] == ret), None)
+        jaldee_r = next((x for x in jaldee_by_retailer if x["retailer"] == ret), None)
+        ga_v_mat = (najma_r["value_sales_mat"] if najma_r else 0) + (jaldee_r["value_sales_mat"] if jaldee_r else 0)
+        ga_v_ya = (najma_r["value_sales_mat_ya"] if najma_r else 0) + (jaldee_r["value_sales_mat_ya"] if jaldee_r else 0)
+        ga_share_mat = ga_v_mat / c_mat * 100 if c_mat else None
+        ga_share_ya = ga_v_ya / c_ya * 100 if c_ya else None
+        by_retailer_share.append({
+            "retailer": ret, "category_value_mat": c_mat, "category_value_yoy_pct": pct_change(c_mat, c_ya),
+            "ga_value_mat": ga_v_mat,
+            "ga_share_mat_pct": round(ga_share_mat, 2) if ga_share_mat is not None else None,
+            "ga_share_mat_ya_pct": round(ga_share_ya, 2) if ga_share_ya is not None else None,
+            "share_point_change": round(ga_share_mat - ga_share_ya, 2) if ga_share_mat is not None and ga_share_ya is not None else None,
+        })
+
+    ga_mat, ga_ya = najma_mat + jaldee_mat, najma_ya + jaldee_ya
+    share_mat = ga_mat / cat_mat * 100 if cat_mat else None
+    share_ya = ga_ya / cat_ya * 100 if cat_ya else None
+
+    # Najma's own reference-match split (how much of its true value sits on the
+    # clean matched brand string vs. a raw unmatched fallback)
+    najma_match = _df(conn, """
+        SELECT CASE WHEN NULLIF(GA_BRAND,'') IS NOT NULL THEN 'MATCHED' ELSE 'UNMATCHED' END AS STATUS,
+               SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'NAJMA%' AND PERIOD_MATX = 'MAT'
+        GROUP BY 1
+    """).set_index("STATUS").VALUE_SALES
+    matched_val = float(najma_match.get("MATCHED", 0) or 0)
+    unmatched_val = float(najma_match.get("UNMATCHED", 0) or 0)
+
+    # uniform correction, same rule for every brand: fold in same-brand rows sitting
+    # outside GA_BUYER='HALAL' only where the raw retailer text also says "HALAL"
+    ranked = _df(conn, f"""
+        WITH halal_rows AS (
+            SELECT COALESCE(NULLIF(GA_BRAND,''),AC_BRAND) AS BRAND, VALUE_SALES, UNIT_SALES
+            FROM GOLDENACRE.TRANSFORM.HC_MASTER
+            WHERE COALESCE(GA_BUYER,'UNCLASSIFIED') = '{GA_CATEGORY}' AND PERIOD_MATX = 'MAT'
+              AND COALESCE(NULLIF(GA_BRAND,''),AC_BRAND) IS NOT NULL
+        ),
+        halal_roots AS (SELECT DISTINCT BRAND AS ROOT FROM halal_rows),
+        outside_agg AS (
+            SELECT AC_BRAND, SUM(VALUE_SALES) AS VALUE_SALES, SUM(UNIT_SALES) AS UNIT_SALES
+            FROM GOLDENACRE.TRANSFORM.HC_MASTER
+            WHERE COALESCE(GA_BUYER,'UNCLASSIFIED') != '{GA_CATEGORY}' AND PERIOD_MATX = 'MAT'
+              AND UPPER(AC_BRAND) LIKE '%HALAL%'
+            GROUP BY 1
+        ),
+        matched_outside AS (
+            SELECT o.VALUE_SALES, o.UNIT_SALES, r.ROOT,
+                   ROW_NUMBER() OVER (PARTITION BY o.AC_BRAND ORDER BY LENGTH(r.ROOT) DESC) AS RN
+            FROM outside_agg o JOIN halal_roots r ON UPPER(o.AC_BRAND) LIKE UPPER(r.ROOT) || '%'
+        )
+        SELECT ROOT AS BRAND, VALUE_SALES, UNIT_SALES FROM matched_outside WHERE RN = 1
+        UNION ALL
+        SELECT BRAND, VALUE_SALES, UNIT_SALES FROM halal_rows
+    """)
+    ranked["VALUE_SALES"] = ranked["VALUE_SALES"].astype(float)
+    ranked["UNIT_SALES"] = ranked["UNIT_SALES"].astype(float)
+    ranked = ranked.groupby("BRAND", as_index=False)[["VALUE_SALES", "UNIT_SALES"]].sum().sort_values("VALUE_SALES", ascending=False).reset_index(drop=True)
+    ranked["RANK"] = ranked.index + 1
+    ranked["PRICE_PER_UNIT"] = ranked.VALUE_SALES / ranked.UNIT_SALES.replace(0, np.nan)
+
+    naive = _df(conn, f"""
+        SELECT COALESCE(NULLIF(GA_BRAND,''),AC_BRAND) AS BRAND, SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE COALESCE(GA_BUYER,'UNCLASSIFIED') = '{GA_CATEGORY}' AND PERIOD_MATX = 'MAT'
+          AND COALESCE(NULLIF(GA_BRAND,''),AC_BRAND) IS NOT NULL
+        GROUP BY 1
+    """)
+    naive["VALUE_SALES"] = naive["VALUE_SALES"].astype(float)
+    naive = naive.sort_values("VALUE_SALES", ascending=False).reset_index(drop=True)
+    naive["RANK"] = naive.index + 1
+
+    najma_rank_row = ranked[ranked.BRAND == "NAJMA"]
+    najma_naive_row = naive[naive.BRAND == "NAJMA"]
+
+    top12 = [
+        {
+            "brand": r.BRAND, "rank": int(r.RANK), "value_sales_mat": float(r.VALUE_SALES),
+            "unit_sales_mat": float(r.UNIT_SALES),
+            "price_per_unit": round(float(r.PRICE_PER_UNIT), 3) if pd.notna(r.PRICE_PER_UNIT) else None,
+            "is_golden_acre": r.BRAND == "NAJMA",
+        }
+        for _, r in ranked.head(12).iterrows()
+    ]
+
+    # trailing-12-week momentum: Najma, Jaldee Eats, and the Halal category
+    weekly_najma = _df(conn, """
+        SELECT TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'NAJMA%' GROUP BY 1 ORDER BY 1
+    """)
+    weekly_jaldee = _df(conn, """
+        SELECT TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'JALDEE%' GROUP BY 1 ORDER BY 1
+    """)
+    weekly_category = _df(conn, f"""
+        SELECT TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE COALESCE(GA_BUYER,'UNCLASSIFIED') = '{GA_CATEGORY}' GROUP BY 1 ORDER BY 1
+    """)
+    najma_slope, najma_r2, najma_n = _trend_pct(weekly_najma.VALUE_SALES.to_numpy())
+    jaldee_slope, jaldee_r2, jaldee_n = _trend_pct(weekly_jaldee.VALUE_SALES.to_numpy())
+    cat_slope, cat_r2, cat_n = _trend_pct(weekly_category.VALUE_SALES.to_numpy())
+
+    # monthly series for the Trend page: combined Golden Acre, and by retailer
+    # (mirrors load_monthly_trend()'s own partial-month logic, scoped to GA)
+    monthly = _df(conn, """
+        SELECT YEAR, MONTH_NUMBER,
+               SUM(CASE WHEN UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'NAJMA%'
+                        OR UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'JALDEE%'
+                   THEN VALUE_SALES ELSE 0 END) AS GA_VALUE_SALES,
+               COUNT(DISTINCT TIME_PERIODS) AS N_WEEKS
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER GROUP BY 1, 2 ORDER BY 1, 2
+    """)
+    monthly["GA_VALUE_SALES"] = monthly["GA_VALUE_SALES"].astype(float)
+    weeks_per_month = monthly.N_WEEKS
+    typical_weeks = weeks_per_month.median()
+    max_idx = monthly[["YEAR", "MONTH_NUMBER"]].apply(tuple, axis=1).idxmax()
+    max_year_month = tuple(monthly.loc[max_idx, ["YEAR", "MONTH_NUMBER"]])
+    monthly_ga = [
+        {
+            "year": int(r.YEAR), "month": int(r.MONTH_NUMBER), "value_sales": round(float(r.GA_VALUE_SALES), 2),
+            "partial_month": bool((int(r.YEAR), int(r.MONTH_NUMBER)) == max_year_month and r.N_WEEKS < typical_weeks),
+        }
+        for _, r in monthly.iterrows()
+    ]
+
+    monthly_by_retailer = _df(conn, """
+        SELECT RETAILER, YEAR, MONTH_NUMBER,
+               SUM(CASE WHEN UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'NAJMA%'
+                        OR UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE 'JALDEE%'
+                   THEN VALUE_SALES ELSE 0 END) AS GA_VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER GROUP BY 1, 2, 3 ORDER BY 1, 2, 3
+    """)
+    monthly_by_retailer["GA_VALUE_SALES"] = monthly_by_retailer["GA_VALUE_SALES"].astype(float)
+    monthly_ga_by_retailer = {
+        ret: [
+            {
+                "year": int(r.YEAR), "month": int(r.MONTH_NUMBER), "value_sales": round(float(r.GA_VALUE_SALES), 2),
+                "partial_month": bool((int(r.YEAR), int(r.MONTH_NUMBER)) == max_year_month and
+                                       int(weeks_per_month[(monthly.YEAR == r.YEAR) & (monthly.MONTH_NUMBER == r.MONTH_NUMBER)].iloc[0]) < typical_weeks),
+            }
+            for _, r in g.sort_values(["YEAR", "MONTH_NUMBER"]).iterrows()
+        ]
+        for ret, g in monthly_by_retailer.groupby("RETAILER")
+    }
+
+    absent_check = _df(conn, """
+        SELECT COALESCE(NULLIF(GA_BRAND,''),AC_BRAND) AS BRAND, COUNT(*) AS N
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE ANY
+              ('%ELSINORE%','%ACTI-SHAKE%','%ACTISHAKE%','%GOLDEN ACRE%')
+        GROUP BY 1
+    """)
+
+    return {
+        "category": GA_CATEGORY,
+        "owned_brands_checked": ["NAJMA", "JALDEE EATS", "ELSINORE", "ACTI-SHAKE", "GOLDEN ACRE YOGURTS"],
+        "owned_brands_present_in_dataset": ["NAJMA", "JALDEE EATS"],
+        "owned_brands_absent_confirmed": (
+            {row.BRAND: int(row.N) for _, row in absent_check.iterrows()} if not absent_check.empty
+            else {"ELSINORE": 0, "ACTI-SHAKE": 0, "GOLDEN ACRE YOGURTS": 0}
+        ),
+        "najma": {
+            "value_sales_mat": najma_mat, "value_sales_mat_ya": najma_ya, "value_yoy_pct": pct_change(najma_mat, najma_ya),
+            "unit_sales_mat": najma_units_mat, "unit_sales_mat_ya": najma_units_ya,
+            "unit_yoy_pct": pct_change(najma_units_mat, najma_units_ya),
+            "n_retailers": len([r for r in najma_by_retailer if r["value_sales_mat"] > 0]),
+            "by_retailer": najma_by_retailer,
+        },
+        "jaldee_eats": {
+            "value_sales_mat": jaldee_mat, "value_sales_mat_ya": jaldee_ya, "value_yoy_pct": pct_change(jaldee_mat, jaldee_ya),
+            "unit_sales_mat": jaldee_units_mat, "unit_sales_mat_ya": jaldee_units_ya,
+            "unit_yoy_pct": pct_change(jaldee_units_mat, jaldee_units_ya),
+            "n_retailers": len([r for r in jaldee_by_retailer if r["value_sales_mat"] > 0]),
+            "by_retailer": jaldee_by_retailer,
+        },
+        "najma_reference_match": {
+            "matched_value_mat": matched_val, "unmatched_value_mat": unmatched_val,
+            "matched_pct": round(matched_val / (matched_val + unmatched_val) * 100, 1) if (matched_val + unmatched_val) else None,
+        },
+        "category_total": {"value_sales_mat": cat_mat, "value_sales_mat_ya": cat_ya, "value_yoy_pct": pct_change(cat_mat, cat_ya)},
+        "golden_acre_share": {
+            "combined_value_mat": ga_mat, "combined_value_mat_ya": ga_ya,
+            "share_mat_pct": round(share_mat, 2) if share_mat is not None else None,
+            "share_mat_ya_pct": round(share_ya, 2) if share_ya is not None else None,
+            "share_point_change": round(share_mat - share_ya, 2) if share_mat is not None and share_ya is not None else None,
+        },
+        "by_retailer_share": by_retailer_share,
+        "najma_rank_correction": {
+            "naive_rank": int(najma_naive_row.iloc[0].RANK) if len(najma_naive_row) else None,
+            "naive_value_mat": float(najma_naive_row.iloc[0].VALUE_SALES) if len(najma_naive_row) else None,
+            "corrected_rank": int(najma_rank_row.iloc[0].RANK) if len(najma_rank_row) else None,
+            "corrected_value_mat": float(najma_rank_row.iloc[0].VALUE_SALES) if len(najma_rank_row) else None,
+        },
+        "competitive_set_top12": top12,
+        "trend": {
+            "najma": {"slope_pct_per_week": najma_slope, "r_squared": najma_r2, "weeks_used": najma_n},
+            "jaldee_eats": {"slope_pct_per_week": jaldee_slope, "r_squared": jaldee_r2, "weeks_used": jaldee_n},
+            "category": {"slope_pct_per_week": cat_slope, "r_squared": cat_r2, "weeks_used": cat_n},
+        },
+        "trend_monthly_golden_acre": monthly_ga,
+        "trend_monthly_golden_acre_by_retailer": monthly_ga_by_retailer,
+    }
