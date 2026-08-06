@@ -23,8 +23,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from snowflake_connection import get_connection
 
 BRAND_EXPR = "COALESCE(NULLIF(GA_BRAND, ''), AC_BRAND)"
-CATEGORY_EXPR = "COALESCE(GA_BUYER, 'UNCLASSIFIED')"
 TRAILING_WEEKS = 12
+
+# GA_BUYER is Golden Acre's real business classification (Halal/Polish/Other),
+# null exactly on rows unmatched to the reference database (see
+# goldenacre_analytics_engine.py's identical constant for the full rationale -
+# kept in sync with that file, not duplicated logic drifting independently).
+# Category/brand-map/prediction breakdowns below are scoped to the 3 real
+# segments only; the excluded total is already surfaced via
+# kpis['unmatched_value_sales_mat_pct'], never silently dropped.
+REAL_CATEGORIES = ["HALAL", "POLISH", "OTHER"]
+CLASSIFIED_FILTER_SQL = "GA_BUYER IN ({})".format(", ".join(f"'{c}'" for c in REAL_CATEGORIES))
 
 
 def df(cur, sql):
@@ -132,22 +141,27 @@ def main():
         })
     snapshot["retailer_share"] = retailer_share
 
-    # ---- category (GA_BUYER) share, MAT vs MAT YA ----
+    # ---- category (GA_BUYER) share, MAT vs MAT YA - Halal/Polish/Other only.
+    # share_pct is each segment's share of the CLASSIFIED total, not of all MAT
+    # value - the HTML build must disclose the excluded unmatched total
+    # (snapshot["kpis"]["unmatched_value_sales_mat_pct"]) alongside this, not
+    # just render it silently. ----
     category = df(cur, f"""
-        SELECT {CATEGORY_EXPR} AS CATEGORY, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
+        SELECT GA_BUYER AS CATEGORY, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
         FROM GOLDENACRE.TRANSFORM.HC_MASTER
-        WHERE PERIOD_MATX IN ('MAT', 'MAT YA')
+        WHERE PERIOD_MATX IN ('MAT', 'MAT YA') AND {CLASSIFIED_FILTER_SQL}
         GROUP BY 1, 2
     """)
     c_mat = category[category.PERIOD_MATX == "MAT"].set_index("CATEGORY").VALUE_SALES
     c_mat_ya = category[category.PERIOD_MATX == "MAT YA"].set_index("CATEGORY").VALUE_SALES
+    total_classified_mat_val = c_mat.sum()
     category_share = []
     for cat, val in c_mat.sort_values(ascending=False).items():
         prior = c_mat_ya.get(cat)
         category_share.append({
             "category": cat,
             "value_sales_mat": round(float(val), 2),
-            "share_pct": round(float(val) / float(total_mat_val) * 100, 2),
+            "share_pct": round(float(val) / float(total_classified_mat_val) * 100, 2),
             "value_sales_mat_ya": round(float(prior), 2) if prior is not None else None,
             "change_pct": pct_change(float(val), float(prior) if prior is not None else None),
         })
@@ -183,9 +197,10 @@ def main():
     # "ALL" retailers combined (the default view) and once per retailer, so the HTML
     # can offer a client-side retailer filter without any further Snowflake calls.
     tree = df(cur, f"""
-        SELECT RETAILER, {CATEGORY_EXPR} AS CATEGORY, {BRAND_EXPR} AS BRAND, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
+        SELECT RETAILER, GA_BUYER AS CATEGORY, {BRAND_EXPR} AS BRAND, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
         FROM GOLDENACRE.TRANSFORM.HC_MASTER
         WHERE PERIOD_MATX IN ('MAT', 'MAT YA') AND {BRAND_EXPR} NOT IN ('{{UNATTRIBUTED}}') AND {BRAND_EXPR} IS NOT NULL
+        AND {CLASSIFIED_FILTER_SQL}
         GROUP BY 1, 2, 3, 4
     """)
 
@@ -274,8 +289,8 @@ def main():
         FROM GOLDENACRE.TRANSFORM.HC_MASTER GROUP BY 1, 2 ORDER BY 1, 2
     """)
     weekly_category = df(cur, f"""
-        SELECT {CATEGORY_EXPR} AS CATEGORY, TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES
-        FROM GOLDENACRE.TRANSFORM.HC_MASTER GROUP BY 1, 2 ORDER BY 1, 2
+        SELECT GA_BUYER AS CATEGORY, TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER WHERE {CLASSIFIED_FILTER_SQL} GROUP BY 1, 2 ORDER BY 1, 2
     """)
     weekly_total = weekly_retailer.groupby("TIME_PERIODS", as_index=False).VALUE_SALES.sum().sort_values("TIME_PERIODS")
 

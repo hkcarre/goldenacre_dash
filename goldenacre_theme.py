@@ -186,19 +186,21 @@ def render_powered_by_credit():
 
 def render_header(scope_note=None):
     c = COLORS
+    # Built as one continuous line, deliberately - a multi-line f-string here
+    # produces a whitespace-only line whenever scope_note is falsy, which
+    # Markdown treats as the end of the raw-HTML block; whatever follows then
+    # renders as a literal indented code block instead of HTML. Same fix as
+    # render_metric_tile below - see its comment for the full mechanism and
+    # the real bug this caused there.
     scope_html = f'<div style="font-size:0.78rem;color:{c["text_muted"]};margin-top:4px;">{scope_note}</div>' if scope_note else ""
-    return f"""
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:24px;
-                padding:20px 0;border-bottom:1px solid {c['border']};margin-bottom:24px;">
-        <div style="height:42px;">{_LOGO_SVG}</div>
-        <div style="text-align:right;">
-            <div style="font-family:{FONT_STACK};font-weight:800;font-size:1.1rem;color:{c['text']};">
-                Retail Performance Analytics
-            </div>
-            {scope_html}
-        </div>
-    </div>
-    """
+    return (
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;'
+        f'padding:20px 0;border-bottom:1px solid {c["border"]};margin-bottom:24px;">'
+        f'<div style="height:42px;">{_LOGO_SVG}</div>'
+        f'<div style="text-align:right;">'
+        f'<div style="font-family:{FONT_STACK};font-weight:800;font-size:1.1rem;color:{c["text"]};">'
+        f'Retail Performance Analytics</div>{scope_html}</div></div>'
+    )
 
 
 def render_hero(headline, subtext):
@@ -214,6 +216,19 @@ def render_hero(headline, subtext):
 
 
 def render_metric_tile(label, value, delta_text=None, is_positive=None, sub=None):
+    """Built as one continuous line, deliberately, not a multi-line f-string.
+    Real bug found and fixed 2026-08-06: the previous multi-line version left
+    a whitespace-only line wherever {delta_html} or {sub_html} was empty (e.g.
+    any tile with no delta_text - Avg price per unit, Distinct products,
+    Distinct brands, Reference match all hit this). Markdown treats a blank
+    line as the end of a raw-HTML block; the indented line immediately after
+    it then gets parsed as a NEW block and, being indented >=4 spaces, renders
+    as a literal code block instead of HTML - which is exactly what showed up
+    in production as visible `<div style="...` text instead of the styled sub
+    line. Tiles that pass delta_text never had an empty line, so they never
+    showed the bug - which is why it looked tile-specific rather than a
+    systemic template issue. Single-line output has no blank line to trigger
+    this regardless of which optional args are supplied, for any future caller."""
     c = COLORS
     delta_html = ""
     if delta_text is not None:
@@ -221,15 +236,12 @@ def render_metric_tile(label, value, delta_text=None, is_positive=None, sub=None
         arrow = "" if is_positive is None else ("↑ " if is_positive else "↓ ")
         delta_html = f'<div style="font-size:12.5px;font-weight:600;color:{color};margin-top:4px;">{arrow}{delta_text}</div>'
     sub_html = f'<div style="font-size:11.5px;color:{c["text_faint"]};margin-top:4px;">{sub}</div>' if sub else ""
-    return f"""
-    <div class="ga-card" style="padding:16px 18px;">
-        <div style="font-size:12px;font-weight:600;color:{c['text_muted']};">{label}</div>
-        <div style="font-family:{FONT_STACK};font-weight:800;font-size:24px;letter-spacing:-0.01em;
-                    color:{c['text']};margin-top:4px;">{value}</div>
-        {delta_html}
-        {sub_html}
-    </div>
-    """
+    return (
+        f'<div class="ga-card" style="padding:16px 18px;">'
+        f'<div style="font-size:12px;font-weight:600;color:{c["text_muted"]};">{label}</div>'
+        f'<div style="font-family:{FONT_STACK};font-weight:800;font-size:24px;letter-spacing:-0.01em;'
+        f'color:{c["text"]};margin-top:4px;">{value}</div>{delta_html}{sub_html}</div>'
+    )
 
 
 def render_badge(text, kind="neutral"):

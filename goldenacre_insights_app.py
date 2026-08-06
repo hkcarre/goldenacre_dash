@@ -38,6 +38,19 @@ _APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_APP_DIR / "multi-agents" / "scripts"))
 import goldenacre_analytics_engine as engine
 import goldenacre_pulp
+
+# Optional: the voice feature's dependency chain (kokoro-onnx -> onnxruntime /
+# phonemizer-fork / espeakng-loader) is heavier than anything else here and
+# hasn't been confirmed to install cleanly on every deploy target - if it's
+# unavailable, the rest of the app (including Halal/Polish/Other category
+# breakdowns and everything else) must still work. See KOKORO_AVAILABLE below.
+try:
+    import kokoro_voice
+    KOKORO_AVAILABLE = True
+except ImportError as _kokoro_import_error:
+    kokoro_voice = None
+    KOKORO_AVAILABLE = False
+    _KOKORO_IMPORT_ERROR = _kokoro_import_error
 from goldenacre_theme import (
     inject_global_css, render_header, render_hero, render_metric_tile, render_badge,
     render_insight_card, render_sidebar_brand, render_powered_by_credit, COLORS,
@@ -229,7 +242,12 @@ elif page == "Market Share":
         st.plotly_chart(fig, use_container_width=True)
     with cat_col:
         st.markdown("**By category**")
-        st.caption("\"Unclassified\" is not a business category - it's the share of value sales with no product-reference match at all.")
+        st.caption(
+            f"Halal, Polish and Other only - shares are of the classified total, not all MAT value. "
+            f"Excludes {kpis['unmatched_value_sales_mat_pct']:.1f}% of MAT value "
+            f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) with no product-reference match at all - "
+            f"see Insights for that gap."
+        )
         df = category_share.copy()
         df["label"] = df.category.map(CATEGORY_LABEL)
         fig = px.bar(
@@ -279,6 +297,10 @@ elif page == "Top Brands":
 elif page == "Brand Map":
     st.subheader("Category & brand map")
     st.caption("Tile size = MAT value sales. Colour = change vs. prior MAT. Golden Acre's data has no geographic dimension, so this treemap is the report's \"map\".")
+    st.caption(
+        f"Halal, Polish and Other only - excludes {kpis['unmatched_value_sales_mat_pct']:.1f}% of MAT value "
+        f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) with no product-reference match, so tile sizes don't sum to the KPI total."
+    )
     retailer_choice = st.selectbox("Retailer", ["All retailers"] + [RETAILER_LABEL[r] for r in engine.RETAILERS])
     retailer_key = None if retailer_choice == "All retailers" else next(r for r in engine.RETAILERS if RETAILER_LABEL[r] == retailer_choice)
     tree_df = cached_treemap(retailer_key)
@@ -364,6 +386,7 @@ elif page == "Predictions":
     )
     st.markdown("---")
     st.markdown("**Retailer & category momentum**")
+    st.caption("Category momentum is Halal, Polish and Other only - unmatched-to-reference product rows have no stable category to trend, so they're excluded here (Total and each retailer's momentum above still include them).")
     name_map = {**RETAILER_LABEL, **CATEGORY_LABEL, "TOTAL": "Total"}
     for row_start in range(0, len(predictions), 3):
         cols = st.columns(3)
@@ -391,8 +414,22 @@ elif page == "Insights":
          f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) sit in products with no product-reference match at all - "
          "the single biggest lever for sharper category reporting is expanding reference-database coverage, not merchandising."),
     ]
+    def listen_button(key, html):
+        """Lazy: only synthesizes on click, then stays visible across reruns
+        via session_state - avoids paying Kokoro's ~10-20s/sentence generation
+        cost for every insight on every page load, only for ones actually asked for."""
+        if not KOKORO_AVAILABLE:
+            st.caption(f"\U0001F507 Voice unavailable this deploy ({_KOKORO_IMPORT_ERROR}).")
+            return
+        if st.button("\U0001F50A Listen", key=f"listen_{key}"):
+            st.session_state[f"audio_{key}"] = True
+        if st.session_state.get(f"audio_{key}"):
+            samples, sr = kokoro_voice.synthesize(kokoro_voice.strip_html(html))
+            st.audio(samples, sample_rate=sr)
+
     for i, html in enumerate(insights_html, start=1):
         st.markdown(render_insight_card(i, html), unsafe_allow_html=True)
+        listen_button(f"insight_{i}", html)
 
     ga_share = manufacturer_view["golden_acre_share"]
     ga_corr = manufacturer_view["najma_rank_correction"]
@@ -405,6 +442,7 @@ elif page == "Insights":
         f"it's distribution: Jaldee Eats is Tesco-only while Najma is already established in the other three retailers."
     )
     st.markdown(render_insight_card("\U0001F31F", ga_html), unsafe_allow_html=True)
+    listen_button("insight_ga", ga_html)
 
 # ============================================================ Golden Acre View ============================================================
 elif page == "Golden Acre View":

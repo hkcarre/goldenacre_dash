@@ -26,9 +26,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from snowflake_connection import get_connection
 
 BRAND_EXPR = "COALESCE(NULLIF(GA_BRAND, ''), AC_BRAND)"
-CATEGORY_EXPR = "COALESCE(GA_BUYER, 'UNCLASSIFIED')"
 TRAILING_WEEKS = 12
 RETAILERS = ["ASDA", "MORRISONS", "SAINSBURY", "TESCO"]
+
+# GA_BUYER is Golden Acre's real, production business classification - Halal,
+# Polish, Other. It is null on exactly the rows that failed to match the
+# reference database at all (confirmed directly: GA_BUYER IS NULL <=>
+# REFERENCE_MATCH_STATUS = 'UNMATCHED', a 1:1 correspondence, checked live
+# 2026-08-06). That's not a 4th business category - it's the classification
+# gap already surfaced via kpis['unmatched_value_sales_mat_pct'] - and as of
+# 2026-08-06 it's 45.8% of MAT value (was ~28% of rows at the original build,
+# 2026-07-29 - the gap has grown as LANDING has grown without matching
+# REFERENCE coverage keeping pace). Category/brand-map/prediction breakdowns
+# below are scoped to the 3 real segments only, per Helena's explicit request -
+# never silently drop the excluded total, always disclose it via the existing
+# kpis unmatched_* fields alongside any output that uses this filter.
+REAL_CATEGORIES = ["HALAL", "POLISH", "OTHER"]
+CLASSIFIED_FILTER_SQL = "GA_BUYER IN ({})".format(", ".join(f"'{c}'" for c in REAL_CATEGORIES))
 
 
 def connection():
@@ -103,9 +117,15 @@ def load_retailer_share(conn):
 
 
 def load_category_share(conn):
+    """Halal/Polish/Other only - excludes the unmatched-to-reference rows (see
+    kpis['unmatched_value_sales_mat_pct'] for that figure). share_pct here is
+    therefore each segment's share of the CLASSIFIED total, not of all MAT
+    value - callers must disclose the exclusion alongside this, not just plot it."""
     df = _df(conn, f"""
-        SELECT {CATEGORY_EXPR} AS CATEGORY, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
-        FROM GOLDENACRE.TRANSFORM.HC_MASTER WHERE PERIOD_MATX IN ('MAT', 'MAT YA') GROUP BY 1, 2
+        SELECT GA_BUYER AS CATEGORY, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER
+        WHERE PERIOD_MATX IN ('MAT', 'MAT YA') AND {CLASSIFIED_FILTER_SQL}
+        GROUP BY 1, 2
     """)
     mat = df[df.PERIOD_MATX == "MAT"].set_index("CATEGORY").VALUE_SALES
     ya = df[df.PERIOD_MATX == "MAT YA"].set_index("CATEGORY").VALUE_SALES
@@ -143,12 +163,14 @@ def load_top_brands(conn, limit=10):
 
 
 def load_treemap(conn, retailer=None, top_n=5):
-    """retailer=None means all four retailers combined."""
+    """retailer=None means all four retailers combined. Halal/Polish/Other only -
+    see CLASSIFIED_FILTER_SQL's docstring above."""
     where_retailer = f"AND RETAILER = '{retailer}'" if retailer else ""
     df = _df(conn, f"""
-        SELECT {CATEGORY_EXPR} AS CATEGORY, {BRAND_EXPR} AS BRAND, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
+        SELECT GA_BUYER AS CATEGORY, {BRAND_EXPR} AS BRAND, PERIOD_MATX, SUM(VALUE_SALES) AS VALUE_SALES
         FROM GOLDENACRE.TRANSFORM.HC_MASTER
         WHERE PERIOD_MATX IN ('MAT', 'MAT YA') AND {BRAND_EXPR} NOT IN ('{{UNATTRIBUTED}}') AND {BRAND_EXPR} IS NOT NULL
+        AND {CLASSIFIED_FILTER_SQL}
         {where_retailer}
         GROUP BY 1, 2, 3
     """)
@@ -193,9 +215,12 @@ def load_predictions(conn):
         FROM GOLDENACRE.TRANSFORM.HC_MASTER GROUP BY 1, 2 ORDER BY 1, 2
     """)
     weekly_category = _df(conn, f"""
-        SELECT {CATEGORY_EXPR} AS CATEGORY, TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES
-        FROM GOLDENACRE.TRANSFORM.HC_MASTER GROUP BY 1, 2 ORDER BY 1, 2
+        SELECT GA_BUYER AS CATEGORY, TIME_PERIODS, SUM(VALUE_SALES) AS VALUE_SALES
+        FROM GOLDENACRE.TRANSFORM.HC_MASTER WHERE {CLASSIFIED_FILTER_SQL} GROUP BY 1, 2 ORDER BY 1, 2
     """)
+    # weekly_total intentionally stays unfiltered (TOTAL momentum = the whole
+    # business, unmatched rows included) - only the per-category momentum below
+    # is scoped to Halal/Polish/Other, per CLASSIFIED_FILTER_SQL's docstring.
     weekly_total = weekly_retailer.groupby("TIME_PERIODS", as_index=False).VALUE_SALES.sum().sort_values("TIME_PERIODS")
 
     def trend_pct(values):
