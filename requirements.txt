@@ -6,3 +6,15 @@ plotly
 pandas
 numpy
 anthropic
+
+# Voice on the Insights page (kokoro_voice.py). Pulls onnxruntime,
+# phonemizer-fork and espeakng-loader; espeakng-loader bundles the espeak-ng
+# native library, so no system apt package is needed.
+#
+# REQUIRES PYTHON <= 3.13. kokoro-onnx 0.5.0 declares requires_python
+# "<3.14,>=3.10", and this app was originally deployed on Python 3.14.6, where
+# adding this line would have failed dependency resolution and taken the whole
+# app down. The Streamlit Cloud app was redeployed on 3.12 specifically for
+# this. Python version is chosen in Advanced settings at deploy time, so if the
+# app is ever recreated, pick 3.12 again or drop this line.
+kokoro-onnx
