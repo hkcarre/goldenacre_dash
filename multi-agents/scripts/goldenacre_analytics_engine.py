@@ -646,13 +646,37 @@ def build_insight_texts(kpis, manufacturer_view):
     price_mat_ya = kpis["value_sales_mat_ya"] / kpis["unit_sales_mat_ya"] if kpis["unit_sales_mat_ya"] else None
     price_change = pct_change(price_mat, price_mat_ya) if price_mat_ya else None
 
+    # The price clause is built conditionally on BOTH facts it asserts. The
+    # previous version hardcoded the "cushioned" conclusion regardless of which
+    # way price actually moved, so a refresh in which price fell would have had
+    # the card claim the exact opposite of its own figures; and when price_change
+    # was None it emitted a dangling fragment starting with " - ".
+    value_dir = "down" if kpis["value_sales_change_pct"] < 0 else "up"
+    unit_dir = "fell" if kpis["unit_sales_change_pct"] < 0 else "rose"
+    if price_change is None:
+        price_clause = "."
+    else:
+        # All four quadrants, because the wording is not symmetric: price/mix
+        # either reinforces the volume move or works against it, and "cushioned"
+        # only makes sense against a decline. Getting this from the data rather
+        # than hardcoding it is the point - the previous copy asserted
+        # "cushioned...decline" unconditionally.
+        volume_fell = kpis["unit_sales_change_pct"] < 0
+        same_direction = (price_change > 0) == (not volume_fell)
+        if volume_fell:
+            effect = "compounded the volume decline" if same_direction else "cushioned part of the volume decline"
+        else:
+            effect = "added to the volume gain" if same_direction else "offset part of the volume gain"
+        price_clause = (
+            f", while average price per unit {'rose' if price_change > 0 else 'fell'} "
+            f"{abs(price_change):.1f}% - price/mix {effect}."
+        )
+
     cards = [
         ("insight_1",
-         (f"<strong>Overall value sales are down {abs(kpis['value_sales_change_pct']):.1f}% MAT vs. MAT YA</strong> "
-          f"(£{kpis['value_sales_mat']/1e9:.2f}bn vs. £{kpis['value_sales_mat_ya']/1e9:.2f}bn). Unit sales fell "
-          f"{abs(kpis['unit_sales_change_pct']):.1f}%, while average price per unit "
-          f"{'rose' if price_change and price_change > 0 else 'fell'} {abs(price_change):.1f}%"
-          if price_change is not None else "") + " - price/mix cushioned part of the volume decline."),
+         f"<strong>Overall value sales are {value_dir} {abs(kpis['value_sales_change_pct']):.1f}% MAT vs. MAT YA</strong> "
+         f"(£{kpis['value_sales_mat']/1e9:.2f}bn vs. £{kpis['value_sales_mat_ya']/1e9:.2f}bn). Unit sales "
+         f"{unit_dir} {abs(kpis['unit_sales_change_pct']):.1f}%" + price_clause),
         ("insight_2",
          f"<strong>{kpis['unmatched_value_sales_mat_pct']:.1f}% of MAT value sales</strong> "
          f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) sit in products with no product-reference match at all - "
