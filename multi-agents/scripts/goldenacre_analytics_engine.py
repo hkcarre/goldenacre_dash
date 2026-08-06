@@ -701,12 +701,17 @@ def build_insight_texts(kpis, manufacturer_view):
         by_brand = ", ".join(
             f"{r['brand'].title()} £{r['value_sales_mat']/1e3:.0f}k ({r['value_yoy_pct']:+.0f}%)" for r in rows
         )
+        # Client-facing copy: states what the numbers are and what they mean,
+        # not how the analysis arrived at them. The provenance (found via
+        # AC_MANUFACTURER, absent from the "Our Brands" page) belongs in the
+        # method notes, not in a card the client reads and hears.
+        owned_names = [r["brand"].title() for r in extras.get("owned_extra") or []]
         cards.append((
             "insight_extras",
-            f"<strong>Golden Acre's fastest growth is outside Halal, and outside this report until now.</strong> "
-            f"{by_brand}. Both were found through the data's own manufacturer field rather than Golden Acre's "
-            f"\"Our Brands\" page, which lists neither. The Hungry Boar is an own brand; X Energy is distributed, "
-            f"not owned, so it is excluded from own-brand share. Neither sits in Halal, Polish or Other, so both "
-            f"are invisible on every category view - see Golden Acre View for the detail."
+            f"<strong>Golden Acre's fastest growth is outside the Halal category.</strong> "
+            f"{by_brand}. {' and '.join(owned_names) or 'These'} "
+            f"{'is an own brand' if len(owned_names) == 1 else 'are own brands'}; X Energy is one Golden Acre "
+            f"distributes rather than owns, so it sits outside own-brand share. Neither falls into Halal, Polish "
+            f"or Other, so neither appears in any category breakdown - see Golden Acre View for the detail."
         ))
     return cards

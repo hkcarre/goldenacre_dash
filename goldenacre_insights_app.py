@@ -175,9 +175,8 @@ if page == "Overview":
     st.markdown(
         render_hero(
             "Retail Performance Analytics",
-            "Built on Optia's harmonised <code>HC_MASTER</code> data layer - every figure here is "
-            "computed live from Snowflake, the same source and logic independently QA-verified for "
-            "the delivered analytics report.",
+            "Built on Optia's harmonised data layer - every figure here is computed live, "
+            "and independently verified against source.",
         ),
         unsafe_allow_html=True,
     )
@@ -441,11 +440,10 @@ elif page == "Golden Acre View":
     st.subheader("Golden Acre's own brands vs. the market")
     st.caption(
         "Everything on the other pages treats Golden Acre as the analytics platform, not a competitor. This page "
-        "flips the lens. Ownership is cross-checked two ways: the data's own AC_MANUFACTURER field, and Golden Acre's "
-        "\"Our Brands\" page. Najma and Jaldee Eats sit in Halal and form the competitive set below; The Hungry Boar "
+        "flips the lens. Najma and Jaldee Eats sit in Halal and form the competitive set below; The Hungry Boar "
         "and the distributed X Energy sit outside Halal and are shown separately under \"the rest of the portfolio\". "
-        "Elsinore, Acti-Shake and Golden Acre Yogurts are confirmed absent (checked directly) - none of their "
-        "stockists are ASDA/Morrisons/Sainsbury's/Tesco."
+        "Elsinore, Acti-Shake and Golden Acre Yogurts don't appear in this data at all - none of their stockists "
+        "are ASDA, Morrisons, Sainsbury's or Tesco."
     )
 
     ga_share = manufacturer_view["golden_acre_share"]
@@ -500,7 +498,7 @@ elif page == "Golden Acre View":
         f"\"Unclassified\" instead of Halal. Folding Najma's brand family back together gives its real MAT value of "
         f"£{ga_corr['corrected_value_mat']/1e6:.1f}m - #{ga_corr['corrected_rank']}"
         + (f", ahead of {next_brand['brand']} (£{next_brand['value_sales_mat']/1e6:.1f}m)." if next_brand else ".") +
-        " This correction is applied identically to every brand in the chart above, not just Najma - checked and confirmed."
+        " The same correction is applied identically to every brand in the chart above, not just Najma."
     )
 
     st.markdown("**Retailer distribution & share**")
@@ -546,8 +544,7 @@ elif page == "Golden Acre View":
     if extras["owned_extra"] or extras["distributed"]:
         st.markdown("**The rest of the portfolio**")
         st.caption(
-            "Found via the data's own AC_MANUFACTURER field rather than the \"Our Brands\" page, which lists neither. "
-            "Both sit outside Halal, so neither appears in the competitive set above."
+            "Golden Acre lines outside the Halal category, so neither appears in the competitive set above."
         )
         pcols = st.columns(max(2, len(extras["owned_extra"]) + len(extras["distributed"])))
         idx = 0
@@ -568,13 +565,11 @@ elif page == "Golden Acre View":
                 ), unsafe_allow_html=True)
             idx += 1
         st.info(
-            f"**These are the fastest-growing lines in the portfolio, and until now none of them were in this report.** "
-            f"Together they are £{(extras['owned_extra_total_mat'] + extras['distributed_total_mat'])/1e3:.0f}k MAT. "
-            f"The Hungry Boar (£{extras['owned_extra_total_mat']/1e3:.0f}k, own brand) is missing from Golden Acre's own "
-            "\"Our Brands\" page, which is why an earlier version of this analysis missed it - it was found in the "
-            "AC_MANUFACTURER field and confirmed against the trade-press launch coverage. X Energy is excluded from the "
-            "combined-share figure at the top of this page on purpose: Golden Acre is named as its UK distributor, not "
-            "its owner, so counting it would overstate own-brand share."
+            f"**These are the fastest-growing lines in the portfolio.** Together they are "
+            f"£{(extras['owned_extra_total_mat'] + extras['distributed_total_mat'])/1e3:.0f}k MAT, and because both sit "
+            "outside Halal, Polish and Other, neither shows up in any category view. X Energy is deliberately excluded "
+            "from the combined-share figure at the top of this page: Golden Acre distributes it rather than owning it, "
+            "so counting it would overstate own-brand share."
         )
 
 # ============================================================ Ask Sprout (full page, real chat) ============================================================
