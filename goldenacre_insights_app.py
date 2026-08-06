@@ -37,6 +37,7 @@ from dotenv import load_dotenv
 _APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_APP_DIR / "multi-agents" / "scripts"))
 import goldenacre_analytics_engine as engine
+import goldenacre_insight_copy
 import goldenacre_pulp
 
 # Optional: the voice feature's dependency chain (kokoro-onnx -> onnxruntime /
@@ -400,10 +401,9 @@ elif page == "Predictions":
 # ============================================================ Insights ============================================================
 elif page == "Insights":
     st.subheader("Actionable insights")
-    # Built in the engine, not here, so the pre-generated audio clips are
-    # guaranteed to be speaking these exact strings - see
-    # engine.build_insight_texts for why that matters on this project.
-    insight_cards = engine.build_insight_texts(kpis, manufacturer_view)
+    # Shared with the audio builder so the clips speak these exact strings -
+    # see goldenacre_insight_copy's docstring for why it sits at the repo root.
+    insight_cards = goldenacre_insight_copy.build_insight_texts(kpis, manufacturer_view)
     def listen_button(key, html):
         """Lazy: only synthesizes on click, then stays visible across reruns via
         session_state - avoids paying Kokoro's generation cost (roughly the

@@ -29,6 +29,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import goldenacre_analytics_engine as engine  # noqa: E402
+import goldenacre_insight_copy  # noqa: E402
 import kokoro_voice  # noqa: E402
 
 
@@ -42,7 +43,7 @@ def main():
     finally:
         conn.close()
 
-    cards = engine.build_insight_texts(kpis, manufacturer_view)
+    cards = goldenacre_insight_copy.build_insight_texts(kpis, manufacturer_view)
     print(f"{len(cards)} insight cards\n")
 
     expected = set()
