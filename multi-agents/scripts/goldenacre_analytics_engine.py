@@ -284,6 +284,78 @@ def _trend_pct(values):
     return round(slope / mean * 100, 3), round(r2, 3), len(y)
 
 
+# Brands the DATA'S OWN AC_MANUFACTURER field attributes to Golden Acre, which
+# the NAJMA%/JALDEE% brand-name rule below never sees. Found 2026-08-06: the
+# original manufacturer view was built on brand-string matching because scan
+# data was assumed to carry no manufacturer column. It does - AC_MANUFACTURER is
+# 98.9% populated, and 1,214 of the 2,279 'GOLDEN ACRE FOODS' rows were invisible
+# to the brand rule.
+#
+# The two are kept apart deliberately, because they are not the same claim:
+#   OWNED       - Golden Acre's own brand. The Hungry Boar is absent from their
+#                 own /our-brands/ page (which is why it was missed), but the
+#                 trade press covers the Booker/Tesco launch and goldenacrefoods
+#                 .com carries its awards page. It belongs in own-brand share.
+#   DISTRIBUTED - Golden Acre is named only as the UK distributor. Folding this
+#                 into "Golden Acre's share" would overstate a manufacturer
+#                 metric, so it is reported separately and excluded from it.
+GA_MANUFACTURER = "GOLDEN ACRE FOODS"
+GA_EXTRA_OWNED = {"THE HUNGRY BOAR": "%HUNGRY BOAR%"}
+GA_EXTRA_DISTRIBUTED = {"X ENERGY": "X ENERGY%"}
+
+
+def _load_portfolio_extras(conn):
+    """Per-brand MAT/MAT YA for the AC_MANUFACTURER-attributed brands above.
+
+    Scoped by manufacturer AND brand pattern together: manufacturer alone would
+    sweep in Najma/Jaldee (already counted by the main view, so double-counting),
+    and brand alone risks catching an unrelated third party using a similar name.
+    """
+    def rows_for(patterns):
+        out = []
+        for brand, like in patterns.items():
+            df = _df(conn, f"""
+                SELECT PERIOD_MATX,
+                       SUM(VALUE_SALES) AS VALUE_SALES,
+                       SUM(UNIT_SALES)  AS UNIT_SALES,
+                       COUNT(DISTINCT RETAILER) AS N_RETAILERS
+                FROM GOLDENACRE.TRANSFORM.HC_MASTER
+                WHERE UPPER(AC_MANUFACTURER) = '{GA_MANUFACTURER}'
+                  AND UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE '{like}'
+                  AND PERIOD_MATX IN ('MAT','MAT YA')
+                GROUP BY 1
+            """).set_index("PERIOD_MATX")
+            if df.empty:
+                continue
+            mat = float(df.VALUE_SALES.get("MAT", 0) or 0)
+            ya = float(df.VALUE_SALES.get("MAT YA", 0) or 0)
+            ret = _df(conn, f"""
+                SELECT DISTINCT RETAILER FROM GOLDENACRE.TRANSFORM.HC_MASTER
+                WHERE UPPER(AC_MANUFACTURER) = '{GA_MANUFACTURER}'
+                  AND UPPER(COALESCE(NULLIF(GA_BRAND,''),AC_BRAND)) LIKE '{like}'
+                  AND PERIOD_MATX = 'MAT' AND VALUE_SALES > 0
+                ORDER BY 1
+            """)
+            out.append({
+                "brand": brand,
+                "value_sales_mat": mat,
+                "value_sales_mat_ya": ya,
+                "value_yoy_pct": pct_change(mat, ya),
+                "unit_sales_mat": float(df.UNIT_SALES.get("MAT", 0) or 0),
+                "retailers": list(ret.RETAILER) if not ret.empty else [],
+            })
+        return sorted(out, key=lambda r: r["value_sales_mat"], reverse=True)
+
+    owned = rows_for(GA_EXTRA_OWNED)
+    distributed = rows_for(GA_EXTRA_DISTRIBUTED)
+    return {
+        "owned_extra": owned,
+        "distributed": distributed,
+        "owned_extra_total_mat": sum(r["value_sales_mat"] for r in owned),
+        "distributed_total_mat": sum(r["value_sales_mat"] for r in distributed),
+    }
+
+
 def load_manufacturer_view(conn):
     def brand_family(period, by_retailer=False):
         cols = "RETAILER, " if by_retailer else ""
@@ -501,10 +573,17 @@ def load_manufacturer_view(conn):
         GROUP BY 1
     """)
 
+    extras = _load_portfolio_extras(conn)
+
     return {
         "category": GA_CATEGORY,
-        "owned_brands_checked": ["NAJMA", "JALDEE EATS", "ELSINORE", "ACTI-SHAKE", "GOLDEN ACRE YOGURTS"],
-        "owned_brands_present_in_dataset": ["NAJMA", "JALDEE EATS"],
+        # THE HUNGRY BOAR / X ENERGY were found via AC_MANUFACTURER, not via the
+        # website's /our-brands/ page, which lists neither - see GA_EXTRA_OWNED.
+        "owned_brands_checked": ["NAJMA", "JALDEE EATS", "THE HUNGRY BOAR", "ELSINORE",
+                                 "ACTI-SHAKE", "GOLDEN ACRE YOGURTS"],
+        "owned_brands_present_in_dataset": ["NAJMA", "JALDEE EATS", "THE HUNGRY BOAR"],
+        "distributed_brands_present_in_dataset": ["X ENERGY"],
+        "portfolio_extras": extras,
         "owned_brands_absent_confirmed": (
             {row.BRAND: int(row.N) for _, row in absent_check.iterrows()} if not absent_check.empty
             else {"ELSINORE": 0, "ACTI-SHAKE": 0, "GOLDEN ACRE YOGURTS": 0}
@@ -550,3 +629,60 @@ def load_manufacturer_view(conn):
         "trend_monthly_golden_acre": monthly_ga,
         "trend_monthly_golden_acre_by_retailer": monthly_ga_by_retailer,
     }
+
+
+def build_insight_texts(kpis, manufacturer_view):
+    """The Insights page's narrative cards, as [(key, html), ...].
+
+    Lives here, not in the Streamlit app, because it has two consumers that must
+    never disagree: the app renders these as cards, and
+    build_goldenacre_audio.py pre-generates the spoken clips from the very same
+    strings. Duplicating the wording in the audio builder would reintroduce this
+    project's most persistent failure mode - hand-written narrative drifting away
+    from the live figures beside it - except this time the drift would be audible
+    and invisible to a code review of the page.
+    """
+    price_mat = kpis["avg_price_per_unit_mat"]
+    price_mat_ya = kpis["value_sales_mat_ya"] / kpis["unit_sales_mat_ya"] if kpis["unit_sales_mat_ya"] else None
+    price_change = pct_change(price_mat, price_mat_ya) if price_mat_ya else None
+
+    cards = [
+        ("insight_1",
+         (f"<strong>Overall value sales are down {abs(kpis['value_sales_change_pct']):.1f}% MAT vs. MAT YA</strong> "
+          f"(£{kpis['value_sales_mat']/1e9:.2f}bn vs. £{kpis['value_sales_mat_ya']/1e9:.2f}bn). Unit sales fell "
+          f"{abs(kpis['unit_sales_change_pct']):.1f}%, while average price per unit "
+          f"{'rose' if price_change and price_change > 0 else 'fell'} {abs(price_change):.1f}%"
+          if price_change is not None else "") + " - price/mix cushioned part of the volume decline."),
+        ("insight_2",
+         f"<strong>{kpis['unmatched_value_sales_mat_pct']:.1f}% of MAT value sales</strong> "
+         f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) sit in products with no product-reference match at all - "
+         "the single biggest lever for sharper category reporting is expanding reference-database coverage, not merchandising."),
+    ]
+
+    ga_share = manufacturer_view["golden_acre_share"]
+    ga_corr = manufacturer_view["najma_rank_correction"]
+    cards.append((
+        "insight_ga",
+        f"<strong>Golden Acre is gaining share in a shrinking category.</strong> Halal overall is down "
+        f"{abs(manufacturer_view['category_total']['value_yoy_pct']):.1f}% MAT, but Najma + Jaldee Eats' combined "
+        f"share rose {'+' if ga_share['share_point_change'] > 0 else ''}{ga_share['share_point_change']:.2f}pp - and "
+        f"gained share in every retailer it's listed in, not just on average. Najma's true rank is #{ga_corr['corrected_rank']} "
+        f"(not #{ga_corr['naive_rank']} - see Golden Acre View for why), and the clearest near-term lever isn't demand, "
+        f"it's distribution: Jaldee Eats is Tesco-only while Najma is already established in the other three retailers."
+    ))
+
+    extras = manufacturer_view.get("portfolio_extras") or {}
+    rows = (extras.get("owned_extra") or []) + (extras.get("distributed") or [])
+    if rows:
+        by_brand = ", ".join(
+            f"{r['brand'].title()} £{r['value_sales_mat']/1e3:.0f}k ({r['value_yoy_pct']:+.0f}%)" for r in rows
+        )
+        cards.append((
+            "insight_extras",
+            f"<strong>Golden Acre's fastest growth is outside Halal, and outside this report until now.</strong> "
+            f"{by_brand}. Both were found through the data's own manufacturer field rather than Golden Acre's "
+            f"\"Our Brands\" page, which lists neither. The Hungry Boar is an own brand; X Energy is distributed, "
+            f"not owned, so it is excluded from own-brand share. Neither sits in Halal, Polish or Other, so both "
+            f"are invisible on every category view - see Golden Acre View for the detail."
+        ))
+    return cards

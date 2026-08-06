@@ -401,19 +401,10 @@ elif page == "Predictions":
 # ============================================================ Insights ============================================================
 elif page == "Insights":
     st.subheader("Actionable insights")
-    price_mat = kpis["avg_price_per_unit_mat"]
-    price_mat_ya = kpis["value_sales_mat_ya"] / kpis["unit_sales_mat_ya"] if kpis["unit_sales_mat_ya"] else None
-    price_change = engine.pct_change(price_mat, price_mat_ya) if price_mat_ya else None
-    insights_html = [
-        (f"<strong>Overall value sales are down {abs(kpis['value_sales_change_pct']):.1f}% MAT vs. MAT YA</strong> "
-         f"(£{kpis['value_sales_mat']/1e9:.2f}bn vs. £{kpis['value_sales_mat_ya']/1e9:.2f}bn). Unit sales fell "
-         f"{abs(kpis['unit_sales_change_pct']):.1f}%, while average price per unit "
-         f"{'rose' if price_change and price_change > 0 else 'fell'} {abs(price_change):.1f}%"
-         if price_change is not None else "") + " - price/mix cushioned part of the volume decline.",
-        (f"<strong>{kpis['unmatched_value_sales_mat_pct']:.1f}% of MAT value sales</strong> "
-         f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) sit in products with no product-reference match at all - "
-         "the single biggest lever for sharper category reporting is expanding reference-database coverage, not merchandising."),
-    ]
+    # Built in the engine, not here, so the pre-generated audio clips are
+    # guaranteed to be speaking these exact strings - see
+    # engine.build_insight_texts for why that matters on this project.
+    insight_cards = engine.build_insight_texts(kpis, manufacturer_view)
     def listen_button(key, html):
         """Lazy: only synthesizes on click, then stays visible across reruns via
         session_state - avoids paying Kokoro's generation cost (roughly the
@@ -424,46 +415,37 @@ elif page == "Insights":
         and its audio player - see the "st-key-ga-listen-" rules in
         goldenacre_theme.inject_global_css."""
         if not KOKORO_AVAILABLE:
-            st.caption(f"\U0001F507 Voice unavailable this deploy ({_KOKORO_IMPORT_ERROR}).")
+            return
+        # to_speech(), not strip_html(): the card's shorthand ("MAT vs. MAT YA",
+        # "£2.52bn") is written to be read, and the first deployed version voiced
+        # it literally.
+        speech = kokoro_voice.to_speech(html)
+        if not kokoro_voice.can_speak(speech):
             return
         with st.container(key=f"ga-listen-{key}"):
-            if st.button("\U0001F50A Listen", key=f"listen_{key}"):
+            label = "\U0001F50A Listen" if kokoro_voice.has_clip(speech) else "\U0001F50A Listen (~30s)"
+            if st.button(label, key=f"listen_{key}"):
                 st.session_state[f"audio_{key}"] = True
             if st.session_state.get(f"audio_{key}"):
-                # to_speech(), not strip_html(): the card's shorthand ("MAT vs.
-                # MAT YA", "£2.52bn") is written to be read, and the first
-                # deployed version voiced it literally.
-                samples, sr = kokoro_voice.synthesize(kokoro_voice.to_speech(html))
-                # autoplay: the click already expressed the intent, so making
-                # the user press play again after a long wait is a second tax.
-                st.audio(samples, sample_rate=sr, autoplay=True)
+                # autoplay: the click already expressed the intent, so making the
+                # user press play again after a wait is a second tax.
+                st.audio(kokoro_voice.audio_wav(speech), format="audio/wav", autoplay=True)
 
-    for i, html in enumerate(insights_html, start=1):
-        st.markdown(render_insight_card(i, html), unsafe_allow_html=True)
-        listen_button(f"insight_{i}", html)
-
-    ga_share = manufacturer_view["golden_acre_share"]
-    ga_corr = manufacturer_view["najma_rank_correction"]
-    ga_html = (
-        f"<strong>Golden Acre is gaining share in a shrinking category.</strong> Halal overall is down "
-        f"{abs(manufacturer_view['category_total']['value_yoy_pct']):.1f}% MAT, but Najma + Jaldee Eats' combined "
-        f"share rose {'+' if ga_share['share_point_change'] > 0 else ''}{ga_share['share_point_change']:.2f}pp - and "
-        f"gained share in every retailer it's listed in, not just on average. Najma's true rank is #{ga_corr['corrected_rank']} "
-        f"(not #{ga_corr['naive_rank']} - see Golden Acre View for why), and the clearest near-term lever isn't demand, "
-        f"it's distribution: Jaldee Eats is Tesco-only while Najma is already established in the other three retailers."
-    )
-    st.markdown(render_insight_card("\U0001F31F", ga_html), unsafe_allow_html=True)
-    listen_button("insight_ga", ga_html)
+    icons = {"insight_ga": "\U0001F31F", "insight_extras": "\U0001F50D"}
+    for n, (key, html) in enumerate(insight_cards, start=1):
+        st.markdown(render_insight_card(icons.get(key, n), html), unsafe_allow_html=True)
+        listen_button(key, html)
 
 # ============================================================ Golden Acre View ============================================================
 elif page == "Golden Acre View":
     st.subheader("Golden Acre's own brands vs. the market")
     st.caption(
         "Everything on the other pages treats Golden Acre as the analytics platform, not a competitor. This page "
-        "flips the lens. Retail scan data has no manufacturer column, so which brands Golden Acre owns is external "
-        "knowledge from its own \"Our Brands\" page - only Najma and Jaldee Eats are sold through ASDA/Morrisons/"
-        "Sainsbury's/Tesco and so appear here; Elsinore, Acti-Shake and Golden Acre Yogurts are confirmed absent "
-        "(checked directly). Both brands sit in Halal, so that's the competitive set below."
+        "flips the lens. Ownership is cross-checked two ways: the data's own AC_MANUFACTURER field, and Golden Acre's "
+        "\"Our Brands\" page. Najma and Jaldee Eats sit in Halal and form the competitive set below; The Hungry Boar "
+        "and the distributed X Energy sit outside Halal and are shown separately under \"the rest of the portfolio\". "
+        "Elsinore, Acti-Shake and Golden Acre Yogurts are confirmed absent (checked directly) - none of their "
+        "stockists are ASDA/Morrisons/Sainsbury's/Tesco."
     )
 
     ga_share = manufacturer_view["golden_acre_share"]
@@ -555,6 +537,45 @@ elif page == "Golden Acre View":
         "ASDA, Morrisons or Sainsbury's, the same three retailers where Najma is already listed and gaining share. "
         "That is a plausible listing-expansion opportunity, not a demand problem this data can diagnose on its own."
     )
+
+    # Everything above is the Halal competitive set. These two brands are Golden
+    # Acre's too but sit outside Halal, so they'd otherwise be invisible on every
+    # page - including the Halal/Polish/Other category views, since both fall in
+    # the unclassified reference-match bucket.
+    extras = manufacturer_view["portfolio_extras"]
+    if extras["owned_extra"] or extras["distributed"]:
+        st.markdown("**The rest of the portfolio**")
+        st.caption(
+            "Found via the data's own AC_MANUFACTURER field rather than the \"Our Brands\" page, which lists neither. "
+            "Both sit outside Halal, so neither appears in the competitive set above."
+        )
+        pcols = st.columns(max(2, len(extras["owned_extra"]) + len(extras["distributed"])))
+        idx = 0
+        for row in extras["owned_extra"]:
+            with pcols[idx]:
+                st.markdown(render_metric_tile(
+                    f"{row['brand'].title()} (MAT)", f"£{row['value_sales_mat']/1e3:.0f}k",
+                    f"{row['value_yoy_pct']:+.1f}%", row["value_yoy_pct"] > 0,
+                    f"Own brand - {', '.join(RETAILER_LABEL.get(r, r) for r in row['retailers'])}",
+                ), unsafe_allow_html=True)
+            idx += 1
+        for row in extras["distributed"]:
+            with pcols[idx]:
+                st.markdown(render_metric_tile(
+                    f"{row['brand'].title()} (MAT)", f"£{row['value_sales_mat']/1e3:.0f}k",
+                    f"{row['value_yoy_pct']:+.1f}%", row["value_yoy_pct"] > 0,
+                    f"Distributed, not owned - {', '.join(RETAILER_LABEL.get(r, r) for r in row['retailers'])}",
+                ), unsafe_allow_html=True)
+            idx += 1
+        st.info(
+            f"**These are the fastest-growing lines in the portfolio, and until now none of them were in this report.** "
+            f"Together they are £{(extras['owned_extra_total_mat'] + extras['distributed_total_mat'])/1e3:.0f}k MAT. "
+            f"The Hungry Boar (£{extras['owned_extra_total_mat']/1e3:.0f}k, own brand) is missing from Golden Acre's own "
+            "\"Our Brands\" page, which is why an earlier version of this analysis missed it - it was found in the "
+            "AC_MANUFACTURER field and confirmed against the trade-press launch coverage. X Energy is excluded from the "
+            "combined-share figure at the top of this page on purpose: Golden Acre is named as its UK distributor, not "
+            "its owner, so counting it would overstate own-brand share."
+        )
 
 # ============================================================ Ask Sprout (full page, real chat) ============================================================
 elif page == "Ask Sprout":

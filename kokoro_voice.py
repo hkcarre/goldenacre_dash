@@ -16,12 +16,27 @@ phonemization data as pure Python/data files, so no system package
 (load + synthesize + write a valid WAV) before this was wired into the app,
 not assumed from the package description.
 """
+import hashlib
+import io
 import re
 import urllib.request
+import wave
 from pathlib import Path
 
+import numpy as np
 import streamlit as st
-from kokoro_onnx import Kokoro
+
+# kokoro_onnx is imported lazily inside _load_kokoro(), NOT here. A clip that was
+# pre-generated and committed can be served with nothing but the standard library,
+# so a deploy that only ever plays pre-generated audio does not need the package
+# installed at all. Importing at module scope would have made the whole module
+# unimportable without it and thrown that away.
+
+# Pre-generated clips, committed to the repo. Named by a hash of the exact speech
+# text, so a clip can never be played against numbers it wasn't generated from -
+# if the data refresh changes an insight by even one digit, the hash misses and
+# the app falls back to live synthesis rather than reading a stale figure aloud.
+CLIP_DIR = Path(__file__).resolve().parent / "assets" / "audio"
 
 _MODEL_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 _MODEL_FILE = "kokoro-v1.0.int8.onnx"
@@ -94,6 +109,7 @@ def _ensure_model_files():
 
 @st.cache_resource(show_spinner="Loading voice model (first run only, ~120MB download)...")
 def _load_kokoro():
+    from kokoro_onnx import Kokoro  # lazy - see the note at the top of this file
     model_path, voices_path = _ensure_model_files()
     return Kokoro(str(model_path), str(voices_path))
 
@@ -125,3 +141,62 @@ def to_speech(html_text):
     for pattern, replacement in _SPEECH_SUBS:
         text = re.sub(pattern, replacement, text)
     return text.strip()
+
+
+# --------------------------------------------------------------------------
+# Pre-generated clips
+# --------------------------------------------------------------------------
+def speech_key(speech_text, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED):
+    """Filename key for a clip. Covers voice and speed as well as the text, so
+    changing the voice doesn't silently keep serving clips in the old one."""
+    payload = f"{voice}|{speed}|{speech_text}".encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()[:16]
+
+
+def clip_path(speech_text, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED):
+    return CLIP_DIR / f"{speech_key(speech_text, voice, speed)}.wav"
+
+
+def to_wav_bytes(samples, sample_rate):
+    """float32 samples in [-1, 1] -> 16-bit mono PCM WAV. Standard library only:
+    soundfile would drag in a libsndfile system dependency for this alone."""
+    pcm = np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0)
+    pcm = (pcm * 32767.0).astype(np.int16)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(int(sample_rate))
+        w.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def has_clip(speech_text, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED):
+    return clip_path(speech_text, voice, speed).exists()
+
+
+def can_speak(speech_text):
+    """True if this text can be voiced at all - either a committed clip exists,
+    or the model is installed and can generate one live."""
+    if has_clip(speech_text):
+        return True
+    try:
+        import kokoro_onnx  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+@st.cache_data(show_spinner="Generating audio (first time only)...")
+def audio_wav(speech_text, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED, lang=DEFAULT_LANG):
+    """WAV bytes for already-speech-ready text. The one entry point the app uses.
+
+    Serves a committed clip instantly when the text matches one; otherwise runs
+    the model, which costs roughly 30s per insight on a free-tier vCPU. That gap
+    is the entire reason pre-generated clips exist - see
+    multi-agents/scripts/build_goldenacre_audio.py, which writes them."""
+    path = clip_path(speech_text, voice, speed)
+    if path.exists():
+        return path.read_bytes()
+    samples, sample_rate = synthesize(speech_text, voice=voice, speed=speed, lang=lang)
+    return to_wav_bytes(samples, sample_rate)
