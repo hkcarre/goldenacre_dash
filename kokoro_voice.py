@@ -35,6 +35,51 @@ _CACHE_DIR = Path.home() / ".cache" / "kokoro"
 DEFAULT_VOICE = "bf_emma"
 DEFAULT_LANG = "en-gb"
 
+# Slightly faster than natural - a listening-pace choice only: it reads as more
+# confident and less plodding for short analytic statements. Past about 1.25 the
+# British voices start clipping consonants.
+#
+# It does NOT make generation quicker. Measured on this text: 29.9s to produce a
+# 16.6s clip, 30.6s for an 18.2s clip, 30.9s at speed 1.1 - i.e. cost is roughly
+# FLAT across these lengths, not proportional to duration, so neither shortening
+# the text nor raising the speed buys back the wait. Anything that actually fixes
+# the latency has to avoid running the model at request time at all.
+DEFAULT_SPEED = 1.1
+
+# Dashboard prose is written to be READ, and is full of shorthand that a
+# phonemizer voices literally: "MAT" becomes the word "mat", "YA" becomes "ya",
+# "£2.52bn" gets spelled out, and a spaced hyphen is read as the word "dash".
+# These rewrite the text for the ear only - the on-screen card is untouched.
+# Order matters: longest/most specific patterns first, since several of these
+# would otherwise partially match each other.
+_SPEECH_SUBS = [
+    # "3.6% MAT vs. MAT YA" - the whole idiom reads far better as one phrase
+    # than as two independent expansions of MAT.
+    (r"\bMAT\s+vs\.?\s+MAT\s+YA\b", "moving annual total versus the same period a year ago"),
+    (r"\bMAT\s+YA\b", "the same period a year ago"),
+    (r"\bMAT\b", "moving annual total"),
+    # Currency with a magnitude suffix, before the bare-currency rule below.
+    # Case-insensitive suffixes deliberately: the codebase writes both "£15.2M"
+    # and "£2.52bn". A lowercase-only rule let the bare-currency rule below fire
+    # first and produced "15.2 poundsM".
+    (r"£\s*([\d,]+(?:\.\d+)?)\s*[bB][nN]\b", r"\1 billion pounds"),
+    (r"£\s*([\d,]+(?:\.\d+)?)\s*[mM]\b", r"\1 million pounds"),
+    (r"£\s*([\d,]+(?:\.\d+)?)\s*[kK]\b", r"\1 thousand pounds"),
+    (r"£\s*([\d,]+(?:\.\d+)?)", r"\1 pounds"),
+    (r"\b([\d.]+)\s*[bB][nN]\b", r"\1 billion"),
+    (r"\b([\d.]+)\s*pp\b", r"\1 percentage points"),
+    (r"\bYoY\b", "year on year"),
+    (r"\bvs\.?(?=\s)", "versus"),
+    (r"#(\d+)", r"number \1"),
+    # "rose +0.42pp" - the verb already carries direction, so voicing the sign
+    # as "plus" is redundant and reads oddly.
+    (r"(?<=\s)\+(?=[\d.])", ""),
+    (r"(\w)/(\w)", r"\1 \2"),          # "price/mix" - a slash is read aloud otherwise
+    (r"\s+-\s+", ", "),                # spaced hyphen: a pause, not the word "dash"
+    (r"£", " pounds "),                # any stray symbol the rules above missed
+    (r"\s{2,}", " "),
+]
+
 
 def _ensure_model_files():
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,7 +99,7 @@ def _load_kokoro():
 
 
 @st.cache_data(show_spinner="Generating audio...")
-def synthesize(text, voice=DEFAULT_VOICE, speed=1.0, lang=DEFAULT_LANG):
+def synthesize(text, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED, lang=DEFAULT_LANG):
     """Returns (samples: np.ndarray, sample_rate: int). Cached by the exact
     (text, voice, speed, lang) tuple, so re-rendering the same insight on a
     Streamlit rerun never re-runs the model - only a genuinely new/changed
@@ -65,9 +110,18 @@ def synthesize(text, voice=DEFAULT_VOICE, speed=1.0, lang=DEFAULT_LANG):
 
 def strip_html(html_text):
     """Insight cards are built as HTML (<strong> tags for emphasis) - strip
-    tags for natural speech. Currency/percent symbols are left as-is and fed
-    to Kokoro's phonemizer as-is - this was verified to run without error and
-    produce audio of a sane duration, but nobody has actually listened to
-    confirm £/% come out sounding natural; flag it if a generated clip reads
-    those oddly."""
+    tags. Does NOT make the text speakable on its own; use to_speech()."""
     return re.sub(r"<[^>]+>", "", html_text)
+
+
+def to_speech(html_text):
+    """HTML insight card -> text meant for the ear rather than the eye.
+
+    Strips tags, then expands the dashboard shorthand in _SPEECH_SUBS. Without
+    this the voice says "mat versus mat ya" and spells out "bn", which is what
+    the first deployed version actually did. The visible card is never changed
+    by this - only what gets fed to the model."""
+    text = strip_html(html_text)
+    for pattern, replacement in _SPEECH_SUBS:
+        text = re.sub(pattern, replacement, text)
+    return text.strip()

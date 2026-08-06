@@ -153,6 +153,48 @@ def inject_global_css():
     .op-credit .op-logo-wrap {{ display: block; opacity: 0.85; transition: opacity 0.15s ease; }}
     .op-credit:hover .op-logo-wrap {{ opacity: 1; }}
     .op-credit .op-logo-wrap svg {{ height: 12px; width: auto; display: block; }}
+
+    /* --- Listen control (Insights page voice) ----------------------------
+       Scoped via st.container(key="ga-listen-...") which Streamlit renders as
+       a "st-key-<key>" CSS class - the documented way to target one widget
+       rather than every button in the app.
+
+       Deliberately quiet styling: this is a secondary affordance sitting under
+       an insight card, so it must not inherit the full-size navy pill used for
+       primary actions. !important is needed because Streamlit's own emotion
+       styles are generated at a higher specificity than a plain class rule. */
+    [class*="st-key-ga-listen-"] {{ margin: -8px 0 16px; }}
+    [class*="st-key-ga-listen-"] button {{
+        background: transparent !important;
+        border: 1px solid {c['border']} !important;
+        color: {c['text_muted']} !important;
+        border-radius: 999px !important;
+        padding: 0 12px !important;
+        min-height: 0 !important;
+        height: 28px !important;
+        font-size: 11.5px !important;
+        font-weight: 600 !important;
+        box-shadow: none !important;
+    }}
+    [class*="st-key-ga-listen-"] button:hover {{
+        border-color: {c['primary']} !important;
+        color: {c['primary']} !important;
+        background: {c['primary_bg']} !important;
+    }}
+    /* A native <audio> element can only be restyled this far. Size it down and
+       repaint Chrome's control panel so it stops reading as a foreign widget
+       dropped between two cards; other browsers keep their own player. */
+    [class*="st-key-ga-listen-"] [data-testid="stAudio"] {{ margin-top: 6px; }}
+    [class*="st-key-ga-listen-"] audio {{
+        height: 34px; width: 100%; max-width: 360px; display: block;
+    }}
+    [class*="st-key-ga-listen-"] audio::-webkit-media-controls-panel {{
+        background: {c['surface_2']};
+    }}
+    [class*="st-key-ga-listen-"] audio::-webkit-media-controls-current-time-display,
+    [class*="st-key-ga-listen-"] audio::-webkit-media-controls-time-remaining-display {{
+        font-size: 11px; color: {c['text_muted']};
+    }}
     </style>
     """
 

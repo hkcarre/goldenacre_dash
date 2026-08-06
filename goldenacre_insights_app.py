@@ -415,17 +415,28 @@ elif page == "Insights":
          "the single biggest lever for sharper category reporting is expanding reference-database coverage, not merchandising."),
     ]
     def listen_button(key, html):
-        """Lazy: only synthesizes on click, then stays visible across reruns
-        via session_state - avoids paying Kokoro's ~10-20s/sentence generation
-        cost for every insight on every page load, only for ones actually asked for."""
+        """Lazy: only synthesizes on click, then stays visible across reruns via
+        session_state - avoids paying Kokoro's generation cost (roughly the
+        clip's own duration, on a free-tier vCPU) for every insight on every
+        page load, only for ones actually asked for.
+
+        Wrapped in a keyed container so the theme can style just this control
+        and its audio player - see the "st-key-ga-listen-" rules in
+        goldenacre_theme.inject_global_css."""
         if not KOKORO_AVAILABLE:
             st.caption(f"\U0001F507 Voice unavailable this deploy ({_KOKORO_IMPORT_ERROR}).")
             return
-        if st.button("\U0001F50A Listen", key=f"listen_{key}"):
-            st.session_state[f"audio_{key}"] = True
-        if st.session_state.get(f"audio_{key}"):
-            samples, sr = kokoro_voice.synthesize(kokoro_voice.strip_html(html))
-            st.audio(samples, sample_rate=sr)
+        with st.container(key=f"ga-listen-{key}"):
+            if st.button("\U0001F50A Listen", key=f"listen_{key}"):
+                st.session_state[f"audio_{key}"] = True
+            if st.session_state.get(f"audio_{key}"):
+                # to_speech(), not strip_html(): the card's shorthand ("MAT vs.
+                # MAT YA", "£2.52bn") is written to be read, and the first
+                # deployed version voiced it literally.
+                samples, sr = kokoro_voice.synthesize(kokoro_voice.to_speech(html))
+                # autoplay: the click already expressed the intent, so making
+                # the user press play again after a long wait is a second tax.
+                st.audio(samples, sample_rate=sr, autoplay=True)
 
     for i, html in enumerate(insights_html, start=1):
         st.markdown(render_insight_card(i, html), unsafe_allow_html=True)
