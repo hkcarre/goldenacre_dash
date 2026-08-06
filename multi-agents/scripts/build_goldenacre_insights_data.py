@@ -309,7 +309,13 @@ def main():
 
     conn.close()
 
-    out_path = r"C:\Users\helen\AppData\Local\Temp\claude\c--Users-helen-Projects-snowflake\00e37359-5341-4479-93c1-e898e7ff006d\scratchpad\goldenacre_insights_snapshot.json"
+    # Repo-relative, not a hardcoded absolute path. This previously pointed at a
+    # PREVIOUS session's temp scratchpad, which no longer exists - so re-running
+    # this script would either fail or silently write somewhere nobody looks,
+    # while html_report/ still held an older snapshot. Same class of bug as the
+    # hardcoded sys.path entries fixed for the Streamlit Cloud deploy.
+    out_path = Path(__file__).resolve().parents[2] / "html_report" / "goldenacre_insights_snapshot.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=2)
     print(f"Wrote {out_path}")
