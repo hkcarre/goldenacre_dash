@@ -622,7 +622,16 @@ elif page == "Ask Sprout":
             with st.chat_message("assistant", avatar=goldenacre_pulp.AVATAR_ICON):
                 with st.spinner(f"{goldenacre_pulp.NAME} is thinking..."):
                     try:
-                        reply = goldenacre_pulp.ask_sprout(question, sprout_context, st.session_state.sprout_messages[:-1])
+                        reply = goldenacre_pulp.ask_sprout(
+                            question, sprout_context, st.session_state.sprout_messages[:-1],
+                            # Guard failures that survive a retry go to the
+                            # server log so Optia can see which questions are
+                            # producing unverifiable answers; the client only
+                            # ever sees the caution appended to the answer.
+                            on_issue=lambda issues: print(
+                                "[sprout-guard] " + "; ".join(f"{i['kind']}:{i['detail']}" for i in issues),
+                                flush=True),
+                        )
                     except ValueError as e:
                         # ValueError is about the user's own input (empty/too
                         # long), so it is safe and useful to show verbatim.

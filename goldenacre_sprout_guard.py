@@ -133,6 +133,86 @@ def ungrounded_figures(answer, context, extra_allowed=()):
     return out
 
 
+def _brand_numbers(context):
+    """brand name (lowercased) -> every number recorded against it.
+
+    Figure grounding alone cannot catch a SWAP: "Najma £131.8k, Jaldee Eats
+    £19.76m" quotes two figures that are both genuinely in the context, so
+    every number reconciles while the answer is exactly wrong. This is what
+    lets attribution be checked.
+    """
+    found = {}
+
+    def add(name, numbers):
+        if not name:
+            return
+        found.setdefault(str(name).strip().lower(), set()).update(
+            n for n in numbers if isinstance(n, (int, float)) and not isinstance(n, bool)
+        )
+
+    def walk(obj, inherited_name=None):
+        if isinstance(obj, dict):
+            name = obj.get("brand") or obj.get("name") or inherited_name
+            add(name, [v for v in obj.values() if isinstance(v, (int, float))])
+            for k, v in obj.items():
+                # keys like "najma" / "jaldee_eats" name the block beneath them
+                walk(v, k.replace("_", " ") if isinstance(v, dict) and not obj.get("brand") else name)
+        elif isinstance(obj, (list, tuple)):
+            for v in obj:
+                walk(v, inherited_name)
+
+    walk(context)
+    return {k: v for k, v in found.items() if v and len(k) > 2}
+
+
+def misattributed_figures(answer, context):
+    """Money figures attached to the wrong brand.
+
+    A money figure is taken to belong to the nearest brand name mentioned
+    before it, within 120 characters. Deliberately conservative: a figure with
+    no brand nearby, or a brand with nothing recorded against it, is skipped
+    rather than guessed at.
+    """
+    brands = _brand_numbers(context)
+    if not brands:
+        return []
+    low = answer.lower()
+    mentions = []
+    for name in brands:
+        for m in re.finditer(re.escape(name), low):
+            mentions.append((m.start(), name))
+    mentions.sort()
+    if not mentions:
+        return []
+
+    out = []
+    for m in _FIGURE.finditer(answer):
+        if not m.group("currency"):
+            continue
+        figs = parse_figures(m.group(0))
+        if not figs:
+            continue
+        fig = figs[0]
+        pos = m.start()
+        owner = None
+        for start, name in mentions:
+            if start < pos and pos - start <= 120:
+                owner = name           # nearest preceding wins
+        if owner is None:
+            continue
+        known = brands[owner]
+        tol = _tolerance(fig)
+        if any(abs(abs(fig["value"]) - abs(n)) <= tol for n in known):
+            continue
+        # only report when the figure IS a real number elsewhere in the context:
+        # that is a swap. A wholly invented number is already reported as
+        # ungrounded, and reporting it twice just doubles the noise.
+        everywhere = {abs(n) for n in _walk_numbers(context)}
+        if any(abs(abs(fig["value"]) - n) <= tol for n in everywhere):
+            out.append({"brand": owner, "raw": fig["raw"]})
+    return out
+
+
 def leaked_identifiers(answer):
     return [t for t in BANNED_IDENTIFIERS if t.lower() in answer.lower()]
 
@@ -154,6 +234,9 @@ def check_answer(answer, context, extra_allowed=()):
     issues = []
     for fig in ungrounded_figures(answer, context, extra_allowed):
         issues.append({"kind": "ungrounded_figure", "detail": fig["raw"]})
+    for miss in misattributed_figures(answer, context):
+        issues.append({"kind": "misattributed_figure",
+                       "detail": f"{miss['raw']} attached to {miss['brand']}"})
     for tok in leaked_identifiers(answer):
         issues.append({"kind": "internal_identifier", "detail": tok})
     for name in renamed_categories(answer):

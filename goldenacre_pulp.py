@@ -169,10 +169,34 @@ def friendly_error(exc):
     return msg, detail
 
 
-def ask_sprout(question, context, history):
+# Kinds the guard can raise that are worth telling the reader about. A leaked
+# field name is untidy but harmless to a number; an unverifiable or misattributed
+# figure is not, and silently presenting one as fact is the failure this whole
+# mechanism exists to prevent.
+_CAUTION_KINDS = {"ungrounded_figure", "misattributed_figure", "renamed_category"}
+
+CAUTION_NOTE = (
+    "\n\n---\n*One or more figures above could not be reconciled against the "
+    "dashboard's own data. Please check them on the relevant page before using them.*"
+)
+
+
+def ask_sprout(question, context, history, apply_guard=True, on_issue=None):
     """history: list of {"role": "user"|"assistant", "content": str}, most recent last.
     Returns the assistant's reply text, or raises on API error - caller decides how to
     surface that (this module has no Streamlit dependency).
+
+    With apply_guard (the default), the answer is checked by
+    goldenacre_sprout_guard before being returned. Instructing a model not to
+    invent numbers is not the same as checking that it didn't, and the prompt
+    rules here were written after two real defects that reading the prompt would
+    never have revealed. On a failed check the answer is regenerated ONCE with
+    the specific problem named; if it still fails, the answer is returned with a
+    visible caution rather than passed off as verified. Deliberately not
+    suppressed entirely - a silently swallowed answer teaches nobody anything,
+    and the reader is better served by the answer plus a warning than by a blank.
+
+    on_issue, if given, is called with the list of remaining issues, for logging.
 
     Raises ValueError (not RuntimeError, so callers can tell "your input" from "our
     setup") if the question is empty or too long."""
@@ -191,6 +215,36 @@ def ask_sprout(question, context, history):
     system = SYSTEM_PROMPT.format(context_json=json.dumps(context, indent=2, default=str))
     messages = history[-(MAX_MESSAGES_PER_SESSION - 1):] + [{"role": "user", "content": question}]
 
+    answer = _generate(client, system, messages)
+    if not apply_guard:
+        return answer
+
+    import goldenacre_sprout_guard as guard
+
+    issues = guard.check_answer(answer, context)
+    if issues:
+        problems = "; ".join(f"{i['kind']} ({i['detail']})" for i in issues)
+        retry_system = system + (
+            "\n\nYOUR PREVIOUS ANSWER FAILED AN AUTOMATED CHECK: " + problems +
+            "\nRewrite it. Every figure must appear in DATA CONTEXT and be attached to the "
+            "entity it actually belongs to. Use category and brand names exactly as they "
+            "appear there, and name no internal fields. If a figure is not in DATA CONTEXT, "
+            "say you do not have it rather than estimating."
+        )
+        answer = _generate(client, retry_system, messages)
+        issues = guard.check_answer(answer, context)
+
+    if issues:
+        if on_issue:
+            on_issue(issues)
+        if any(i["kind"] in _CAUTION_KINDS for i in issues):
+            answer += CAUTION_NOTE
+    return answer
+
+
+# Split out so the guarded path below can retry, and so tests can substitute a
+# generator without a network call or an API key.
+def _generate(client, system, messages):
     resp = client.messages.create(
         model=MODEL,
         # 500 was too tight - some questions (e.g. anything touching the
