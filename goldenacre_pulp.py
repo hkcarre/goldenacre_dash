@@ -215,7 +215,8 @@ def ask_sprout(question, context, history, apply_guard=True, on_issue=None):
     system = SYSTEM_PROMPT.format(context_json=json.dumps(context, indent=2, default=str))
     messages = history[-(MAX_MESSAGES_PER_SESSION - 1):] + [{"role": "user", "content": question}]
 
-    answer = _generate(client, system, messages)
+    system_blocks = _system_blocks(system)
+    answer = _generate(client, system_blocks, messages)
     if not apply_guard:
         return answer
 
@@ -224,14 +225,21 @@ def ask_sprout(question, context, history, apply_guard=True, on_issue=None):
     issues = guard.check_answer(answer, context)
     if issues:
         problems = "; ".join(f"{i['kind']} ({i['detail']})" for i in issues)
-        retry_system = system + (
-            "\n\nYOUR PREVIOUS ANSWER FAILED AN AUTOMATED CHECK: " + problems +
-            "\nRewrite it. Every figure must appear in DATA CONTEXT and be attached to the "
-            "entity it actually belongs to. Use category and brand names exactly as they "
-            "appear there, and name no internal fields. If a figure is not in DATA CONTEXT, "
-            "say you do not have it rather than estimating."
-        )
-        answer = _generate(client, retry_system, messages)
+        # Appended as a SEPARATE, uncached block. Concatenating it onto the big
+        # block would change the cached text and force a full re-read of ~12,600
+        # tokens on the retry - the one path where the cache is guaranteed to be
+        # warm and most worth having.
+        retry_note = {
+            "type": "text",
+            "text": (
+                "YOUR PREVIOUS ANSWER FAILED AN AUTOMATED CHECK: " + problems +
+                "\nRewrite it. Every figure must appear in DATA CONTEXT and be attached to the "
+                "entity it actually belongs to. Use category and brand names exactly as they "
+                "appear there, and name no internal fields. If a figure is not in DATA CONTEXT, "
+                "say you do not have it rather than estimating."
+            ),
+        }
+        answer = _generate(client, system_blocks + [retry_note], messages)
         issues = guard.check_answer(answer, context)
 
     if issues:
@@ -242,9 +250,33 @@ def ask_sprout(question, context, history, apply_guard=True, on_issue=None):
     return answer
 
 
+def _system_blocks(system_text):
+    """The system prompt as a single cacheable block.
+
+    Sprout re-sends the same ~12,600-token context on every question, which is
+    the bulk of the cost. Marking it cache_control ephemeral means follow-up
+    questions in the same conversation, and the guard's retry, read it from
+    cache at roughly a tenth of the input price instead of paying full rate
+    each time.
+
+    The trade-off, stated because it is not free: writing the cache costs about
+    25% MORE than a plain call, so a single one-off question is slightly dearer.
+    The saving arrives from the second question onwards, which is how the chat
+    is actually used - and the guard's retry alone guarantees one reuse whenever
+    it fires. Cached entries live about 5 minutes, so a conversation benefits
+    and a cold visit an hour later does not.
+    """
+    return [{
+        "type": "text",
+        "text": system_text,
+        "cache_control": {"type": "ephemeral"},
+    }]
+
+
 # Split out so the guarded path below can retry, and so tests can substitute a
 # generator without a network call or an API key.
 def _generate(client, system, messages):
+    """system: a list of system blocks (see _system_blocks), not a bare string."""
     resp = client.messages.create(
         model=MODEL,
         # 500 was too tight - some questions (e.g. anything touching the
