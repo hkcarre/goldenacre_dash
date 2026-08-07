@@ -141,6 +141,34 @@ def build_context(kpis, retailer_share_df, category_share_df, top_brands_df, pre
     return ctx
 
 
+def friendly_error(exc):
+    """A client-safe message for an API failure, plus the raw detail for logs.
+
+    Returns (message_for_the_user, detail_for_the_operator).
+
+    The app previously rendered str(exc) straight into the chat. When the
+    account ran out of credit that put "Your credit balance is too low...
+    go to Plans & Billing" in front of whoever was using the dashboard - an
+    Optia billing matter shown to a Golden Acre user. Nothing here should
+    depend on the client reading an exception.
+    """
+    detail = f"{type(exc).__name__}: {exc}"
+    text = str(exc).lower()
+    if "credit balance" in text or "billing" in text or "quota" in text:
+        msg = (f"{NAME} is temporarily unavailable. The dashboard's data, charts and "
+               "insights are all unaffected - only the chat is off. Please let Optia know.")
+    elif "rate limit" in text or "429" in text:
+        msg = f"{NAME} is handling a lot of questions right now. Give it a few seconds and ask again."
+    elif "authentication" in text or "api key" in text or "401" in text:
+        msg = f"{NAME} isn't configured on this deployment yet. Please let Optia know."
+    elif "overloaded" in text or "529" in text:
+        msg = f"{NAME} is briefly overloaded. Try that question again in a moment."
+    else:
+        msg = (f"{NAME} couldn't answer that one. Everything else on the dashboard is "
+               "unaffected - try again, and let Optia know if it keeps happening.")
+    return msg, detail
+
+
 def ask_sprout(question, context, history):
     """history: list of {"role": "user"|"assistant", "content": str}, most recent last.
     Returns the assistant's reply text, or raises on API error - caller decides how to

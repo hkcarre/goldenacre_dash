@@ -583,7 +583,16 @@ elif page == "Ask Sprout":
     )
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        st.info(f"{goldenacre_pulp.NAME} isn't switched on yet - add `ANTHROPIC_API_KEY` to `.env` to enable live Q&A.")
+        # Name the right place for the environment actually being run. The old
+        # wording said ".env" unconditionally, which is wrong on Streamlit Cloud
+        # (no filesystem to put one on) and sends you looking in the wrong place.
+        _on_cloud = bool(os.environ.get("HOSTNAME", "").startswith("streamlit")) or Path("/mount/src").exists()
+        _where = ("this app's **Settings -> Secrets** panel on Streamlit Cloud"
+                  if _on_cloud else "`.env` in the project root")
+        st.info(
+            f"{goldenacre_pulp.NAME} isn't switched on yet - add `ANTHROPIC_API_KEY` to {_where} "
+            "to enable live Q&A. Every other page works without it."
+        )
     else:
         sprout_context = goldenacre_pulp.build_context(kpis, retailer_share, category_share, top_brands, predictions, manufacturer_view)
 
@@ -615,8 +624,14 @@ elif page == "Ask Sprout":
                     try:
                         reply = goldenacre_pulp.ask_sprout(question, sprout_context, st.session_state.sprout_messages[:-1])
                     except ValueError as e:
+                        # ValueError is about the user's own input (empty/too
+                        # long), so it is safe and useful to show verbatim.
                         reply = f"Couldn't send that: {e}."
                     except Exception as e:
-                        reply = f"{goldenacre_pulp.NAME} hit an error and couldn't answer: {e}"
+                        # Anything else is our problem, not theirs - show a
+                        # client-safe line and put the real cause in the server
+                        # log, where Optia can see it and the client cannot.
+                        reply, _detail = goldenacre_pulp.friendly_error(e)
+                        print(f"[sprout] {_detail}", flush=True)
                 st.markdown(reply)
             st.session_state.sprout_messages.append({"role": "assistant", "content": reply})
