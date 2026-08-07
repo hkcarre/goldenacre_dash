@@ -26,7 +26,6 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -37,6 +36,7 @@ from dotenv import load_dotenv
 _APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_APP_DIR / "multi-agents" / "scripts"))
 import goldenacre_analytics_engine as engine
+import goldenacre_charts
 import goldenacre_insight_copy
 import goldenacre_pulp
 
@@ -163,7 +163,7 @@ with st.sidebar:
 st.markdown(
     render_header(
         scope_note=(
-            "ASDA, Morrisons, Sainsbury's, Tesco - Halal / Polish / World Foods categories. "
+            "ASDA, Morrisons, Sainsbury's, Tesco - Halal / Polish / Other categories. "
             "Source: Optia's harmonised HC_ layer, additive to Golden Acre's existing production pipeline."
         )
     ),
@@ -230,16 +230,13 @@ elif page == "Market Share":
     share_col, cat_col = st.columns(2)
     with share_col:
         st.markdown("**By retailer**")
-        df = retailer_share.copy()
-        df["label"] = df.retailer.map(RETAILER_LABEL)
-        fig = px.bar(
-            df.sort_values("value_sales_mat"), x="value_sales_mat", y="label", orientation="h",
-            color="retailer", color_discrete_map=RETAILER_COLOR,
-            labels={"value_sales_mat": "Value sales (MAT, £)", "label": ""},
-            text=df.sort_values("value_sales_mat")["share_pct"].map(lambda v: f"{v:.1f}%"),
+        st.caption("Each retailer's MAT value against the same period last year - the gap is the change.")
+        goldenacre_charts.dumbbell(
+            [{"label": RETAILER_LABEL.get(r.retailer, r.retailer),
+              "now": r.value_sales_mat, "before": r.value_sales_mat_ya,
+              "delta": r.change_pct} for r in retailer_share.itertuples()],
+            height=290, unit="gbp", beforeLabel="MAT YA", nowLabel="MAT",
         )
-        fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=280, margin=dict(l=0, r=10, t=10, b=10))
-        st.plotly_chart(fig, use_container_width=True)
     with cat_col:
         st.markdown("**By category**")
         st.caption(
@@ -248,42 +245,34 @@ elif page == "Market Share":
             f"(£{kpis['unmatched_value_sales_mat']/1e9:.2f}bn) with no product-reference match at all - "
             f"see Insights for that gap."
         )
-        df = category_share.copy()
-        df["label"] = df.category.map(CATEGORY_LABEL)
-        fig = px.bar(
-            df, x="value_sales_mat", y=[""] * len(df), orientation="h", color="category",
-            color_discrete_map=CATEGORY_COLOR, labels={"value_sales_mat": "Value sales (MAT, £)"},
-            text=df["share_pct"].map(lambda v: f"{v:.1f}%"),
+        goldenacre_charts.dumbbell(
+            [{"label": f"{CATEGORY_LABEL.get(r.category, r.category)}  {r.share_pct:.1f}%",
+              "now": r.value_sales_mat, "before": r.value_sales_mat_ya,
+              "delta": r.change_pct} for r in category_share.itertuples()],
+            height=290, unit="gbp", beforeLabel="MAT YA", nowLabel="MAT", labelWidth=132,
         )
-        fig.update_layout(barmode="stack", plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=280, margin=dict(l=0, r=10, t=10, b=10),
-                           legend_title_text="")
-        st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("**Golden Acre's share, by retailer**")
     st.caption("Najma + Jaldee Eats combined, share of each retailer's own Halal category - a different question from the four-retailer totals above.")
-    ga_df = pd.DataFrame(manufacturer_view["by_retailer_share"]).sort_values("ga_share_mat_pct", ascending=True)
-    ga_df["label"] = ga_df.retailer.map(RETAILER_LABEL)
-    fig = px.bar(
-        ga_df, x="ga_share_mat_pct", y="label", orientation="h",
-        labels={"ga_share_mat_pct": "Golden Acre share of Halal (%)", "label": ""},
-        text=ga_df["share_point_change"].map(lambda v: f"{'+' if v > 0 else ''}{v:.2f}pp"),
+    # The story here is the MOVEMENT - share gained in all four - which the old
+    # bar chart buried in a text label. The dumbbell makes it the shape.
+    goldenacre_charts.dumbbell(
+        [{"label": RETAILER_LABEL.get(r["retailer"], r["retailer"]),
+          "now": r["ga_share_mat_pct"], "before": r["ga_share_mat_ya_pct"],
+          "delta": r["share_point_change"]} for r in manufacturer_view["by_retailer_share"]],
+        height=270, unit="pct", deltaDp=2, deltaUnit="pp",
+        beforeLabel="MAT YA", nowLabel="MAT",
     )
-    fig.update_traces(marker_color=COLORS["gold"])
-    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=240, margin=dict(l=0, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================ Top Brands ============================================================
 elif page == "Top Brands":
     st.subheader("Top 10 brands by value sales")
     st.caption("Brand identity is the reference-matched brand where one exists, otherwise the retailer's own product labelling - so retailer-name entries here are largely private label, not a single manufacturer.")
-    df = top_brands.copy()
-    fig = px.bar(
-        df.sort_values("value_sales_mat"), x="value_sales_mat", y="brand", orientation="h",
-        labels={"value_sales_mat": "Value sales (MAT, £)", "brand": ""},
+    goldenacre_charts.lollipop(
+        [{"label": r.brand, "value": r.value_sales_mat, "delta": r.change_pct}
+         for r in top_brands.itertuples()],
+        height=430, unit="gbp", showDelta=True, labelWidth=168,
     )
-    fig.update_traces(marker_color=COLORS["primary"])
-    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=420, margin=dict(l=0, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
 
     ga_corr = manufacturer_view["najma_rank_correction"]
     st.info(
@@ -319,46 +308,50 @@ elif page == "Brand Map":
         tree_df.loc[najma_mask, "change_pct"] = najma_correction["value_yoy_pct"]
         tree_df.loc[najma_mask, "brand"] = "\U0001F31F Najma (corrected)"
 
-    fig = px.treemap(
-        tree_df, path=["category_label", "brand"], values="value_sales_mat", color="change_pct",
-        color_continuous_scale=["#B23A3A", "#D8D5CB", "#1F7A45"], color_continuous_midpoint=0,
-        labels={"change_pct": "% change vs MAT YA"},
+    goldenacre_charts.treemap(
+        [{"label": r.brand, "value": float(r.value_sales_mat),
+          "growth": None if pd.isna(r.change_pct) else float(r.change_pct),
+          "group": r.category_label} for r in tree_df.itertuples()],
+        height=560,
     )
-    fig.update_layout(height=560, margin=dict(l=0, r=0, t=10, b=0))
-    st.plotly_chart(fig, use_container_width=True)
     st.caption("\U0001F31F = Golden Acre-owned (Najma), value corrected for the reference-match gap - see Golden Acre View.")
 
 # ============================================================ Trend ============================================================
 elif page == "Trend":
     st.subheader("Monthly value sales")
     trend_view = st.radio("View", ["Total", "By retailer", "Golden Acre", "Golden Acre by retailer"], horizontal=True)
+    def _series(df, date_col, value_col, name, color, emphasis=False):
+        d = df.sort_values(date_col)
+        return {"name": name, "color": color, "emphasis": emphasis,
+                "points": [{"x": t.strftime("%Y-%m-%d"), "y": float(v)}
+                           for t, v in zip(d[date_col], d[value_col])]}
+
     if trend_view in ("Total", "By retailer"):
         mt = monthly_trend.copy()
         mt["date"] = pd.to_datetime(dict(year=mt.YEAR, month=mt.MONTH_NUMBER, day=1))
         if trend_view == "Total":
-            agg = mt.groupby("date", as_index=False).agg(VALUE_SALES=("VALUE_SALES", "sum"), PARTIAL_MONTH=("PARTIAL_MONTH", "max"))
-            fig = px.line(agg, x="date", y="VALUE_SALES", labels={"VALUE_SALES": "Value sales (£)", "date": ""})
-            fig.update_traces(line_color=COLORS["primary"])
+            agg = mt.groupby("date", as_index=False).agg(VALUE_SALES=("VALUE_SALES", "sum"))
+            series = [_series(agg, "date", "VALUE_SALES", "All retailers", COLORS["primary"], True)]
         else:
-            mt["label"] = mt.RETAILER.map(RETAILER_LABEL)
-            fig = px.line(mt, x="date", y="VALUE_SALES", color="RETAILER", color_discrete_map=RETAILER_COLOR,
-                          labels={"VALUE_SALES": "Value sales (£)", "date": "", "RETAILER": ""})
+            series = [_series(g, "date", "VALUE_SALES", RETAILER_LABEL.get(ret, ret),
+                              RETAILER_COLOR.get(ret, COLORS["primary"]))
+                      for ret, g in mt.groupby("RETAILER")]
     elif trend_view == "Golden Acre":
         ga_mt = pd.DataFrame(manufacturer_view["trend_monthly_golden_acre"])
         ga_mt["date"] = pd.to_datetime(dict(year=ga_mt.year, month=ga_mt.month, day=1))
-        fig = px.line(ga_mt, x="date", y="value_sales", labels={"value_sales": "Najma + Jaldee Eats value sales (£)", "date": ""})
-        fig.update_traces(line_color=COLORS["gold"])
+        series = [_series(ga_mt, "date", "value_sales", "Najma + Jaldee Eats", COLORS["gold"], True)]
     else:
-        rows = []
-        for ret, points in manufacturer_view["trend_monthly_golden_acre_by_retailer"].items():
-            for p in points:
-                rows.append({**p, "RETAILER": ret})
+        rows = [{**p, "RETAILER": ret}
+                for ret, points in manufacturer_view["trend_monthly_golden_acre_by_retailer"].items()
+                for p in points]
         ga_mt = pd.DataFrame(rows)
         ga_mt["date"] = pd.to_datetime(dict(year=ga_mt.year, month=ga_mt.month, day=1))
-        fig = px.line(ga_mt, x="date", y="value_sales", color="RETAILER", color_discrete_map=RETAILER_COLOR,
-                      labels={"value_sales": "Value sales (£)", "date": "", "RETAILER": ""})
-    fig.update_layout(plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=440, margin=dict(l=0, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
+        series = [_series(g, "date", "value_sales", RETAILER_LABEL.get(ret, ret),
+                          RETAILER_COLOR.get(ret, COLORS["primary"]))
+                  for ret, g in ga_mt.groupby("RETAILER")]
+    # Series labelled at their end points instead of in a legend - no colour
+    # matching, and the last value is where the reader's eye already is.
+    goldenacre_charts.multiline(series, height=450)
     if trend_view == "Golden Acre by retailer":
         st.caption("Tesco's line includes Jaldee Eats (Tesco-only); the other three retailers are Najma alone. The final month is a partial period.")
     else:
@@ -480,13 +473,13 @@ elif page == "Golden Acre View":
     st.caption("Top Halal brands by MAT value sales. Golden Acre's own brand highlighted.")
     rank_df = pd.DataFrame(manufacturer_view["competitive_set_top12"])
     rank_df["label"] = rank_df.apply(lambda r: f"#{r['rank']} {r['brand']}" + (" \U0001F31F" if r["is_golden_acre"] else ""), axis=1)
-    fig = px.bar(
-        rank_df.sort_values("rank", ascending=False), x="value_sales_mat", y="label", orientation="h",
-        color="is_golden_acre", color_discrete_map={True: COLORS["gold"], False: COLORS["primary"]},
-        labels={"value_sales_mat": "Value sales (MAT, £)", "label": ""},
+    goldenacre_charts.lollipop(
+        [{"label": f"#{r['rank']} {r['brand']}", "value": r["value_sales_mat"],
+          "delta": r.get("value_yoy_pct"), "highlight": bool(r["is_golden_acre"]),
+          "note": "Golden Acre's own brand" if r["is_golden_acre"] else None}
+         for r in manufacturer_view["competitive_set_top12"]],
+        height=440, unit="gbp", showDelta=True, labelWidth=180,
     )
-    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=420, margin=dict(l=0, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
 
     next_brand = next((r for r in manufacturer_view["competitive_set_top12"] if r["rank"] == ga_corr["corrected_rank"] + 1), None)
     st.info(
@@ -518,14 +511,14 @@ elif page == "Golden Acre View":
 
     st.markdown("**Price positioning**")
     st.caption("Value ÷ unit sales, MAT. Golden Acre's own brand highlighted.")
-    price_df = rank_df[rank_df.price_per_unit.notna()].head(7)
-    fig = px.bar(
-        price_df.sort_values("price_per_unit"), x="price_per_unit", y="brand", orientation="h",
-        color="is_golden_acre", color_discrete_map={True: COLORS["gold"], False: COLORS["teal"]},
-        labels={"price_per_unit": "Price per unit (£)", "brand": ""},
+    price_df = rank_df[rank_df.price_per_unit.notna()].head(7).sort_values("price_per_unit", ascending=False)
+    goldenacre_charts.lollipop(
+        [{"label": r.brand, "value": float(r.price_per_unit),
+          "highlight": bool(r.is_golden_acre),
+          "note": "Golden Acre's own brand" if r.is_golden_acre else None}
+         for r in price_df.itertuples()],
+        height=330, unit="gbp", labelWidth=168,
     )
-    fig.update_layout(showlegend=False, plot_bgcolor=COLORS["card"], paper_bgcolor=COLORS["card"], height=320, margin=dict(l=0, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
     st.caption("Najma and Lancashire Farm price well below Shazans/Haji Baba/Tariq Halal - a lower-unit-price, higher-volume segment within Halal, not evidence either pricing strategy is \"wrong\".")
 
     st.markdown("**Whitespace**")

@@ -104,7 +104,11 @@ def build_context(kpis, retailer_share_df, category_share_df, top_brands_df, pre
     corrected-vs-naive Halal ranking. Optional only so this function still works
     if a caller doesn't have it yet; the app always passes it."""
     ctx = {
-        "scope": "ASDA, Morrisons, Sainsbury's, Tesco - Halal/Polish/World Foods categories",
+        # "Other", not "World Foods". Sprout was flagged in QA for calling the
+        # Other category "World Foods" and a prompt rule was added to stop it -
+        # but the term was coming from THIS line, in its own context. The rule
+        # stays as a backstop; this was the actual cause.
+        "scope": "ASDA, Morrisons, Sainsbury's, Tesco - Halal/Polish/Other categories",
         "source": "GOLDENACRE.TRANSFORM.HC_MASTER (Optia's additive HC_ harmonisation layer)",
         "user_context": "The person asking works for Golden Acre Foods, the manufacturer. Golden Acre's own brands are Najma, Jaldee Eats and The Hungry Boar; X Energy is distributed by Golden Acre but not owned by them, so it is excluded from own-brand share (see golden_acre_own_brands below) - everything else in this data is the market, not Golden Acre's own performance.",
     }
